@@ -137,6 +137,10 @@ tags
 
 #example folder
 examples/
+!examples/ase/ppdouble_well_ase/analyze.sh
+!examples/ase/ppdouble_well_ase/conv_inf_py.py
+!examples/ase/ppdouble_well_ase/fakeretis.rst
+!examples/ase/ppdouble_well_ase/infretis.toml
 !examples/ase/H2/conf.traj
 !examples/ase/H2/H2-calc.py
 !examples/ase/H2/infretis0.toml

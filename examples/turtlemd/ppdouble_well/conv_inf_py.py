@@ -69,7 +69,10 @@ def print_pathens(inp):
     steps = {ens: 0 for ens in enss}
     moves = {ens: 'sh' if ens in ['000', '001'] else 'wf' for ens in enss}
 
+    # Create directories if they don't exist
     for ens in enss:
+        if not os.path.exists(f'./{ens}'):
+            os.makedirs(f'./{ens}')
         with open(f'./{ens}/pathensemble.txt', 'w') as fp:
             fp.write(HEAD + '\n')
 

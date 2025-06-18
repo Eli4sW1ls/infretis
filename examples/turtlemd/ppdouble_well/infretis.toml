@@ -15,7 +15,7 @@ wmdrun = ['not used',
 [simulation]
 mode = "pp"
 interfaces = [-0.99, -0.8, -0.7, -0.6, -0.5, -0.4, -0.3, 0, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 1.0]
-steps = 200000
+steps = 20000
 seed = 0
 load_dir = 'load'
 # shooting_moves = ['sh','sh','wf','wf','wf','wf','wf','wf']
@@ -23,7 +23,7 @@ shooting_moves = ['sh','sh','sh','sh','sh','sh','sh','sh','sh','sh','sh','sh','s
 
 
 [simulation.tis_set]
-maxlength = 2000
+maxlength = 20000
 allowmaxlength = false
 zero_momentum = false # momentum true
 n_jumps = 4
@@ -68,5 +68,5 @@ module = 'orderp.py'
 data_dir = "./" # where to store infretis_data.txt
 screen = 1 # how often to print to sim.log
 pattern = false # how often we print info of which worker is in which ensemble at any time to pattern.txt
-delete_old = true # delete old accepted trajectories (e.g. .trr or .xyz files)
-delete_old_all = true # delete old accepted trajectories (e.g. .trr or .xyz files)
+delete_old = false # delete old accepted trajectories (e.g. .trr or .xyz files)
+delete_old_all = false # delete old accepted trajectories (e.g. .trr or .xyz files)
