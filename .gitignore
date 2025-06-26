@@ -137,6 +137,7 @@ tags
 
 #example folder
 examples/
+!examples/ase/
 !examples/ase/ppdouble_well_ase/analyze.sh
 !examples/ase/ppdouble_well_ase/conv_inf_py.py
 !examples/ase/ppdouble_well_ase/fakeretis.rst
