@@ -277,7 +277,8 @@ def select_shoot(
     sh_moves: Dict[str, MoveMethod] = {
         "wf": wire_fencing,
         "sh": shoot,
-        "st": staple,
+        "st_sh": staple_sh,
+        "st_wf": staple_wf,
     }
 
     # set engine, might also depend on chosen move
@@ -1706,7 +1707,7 @@ def ppretis_swap(
     return accept, (path0, path1), status
 
 
-def staple(
+def staple_sh(
     ens_set: Dict[str, Any],
     path: InfPath,
     engine: EngineBase,
@@ -1869,4 +1870,98 @@ def staple(
 
     return True, trial_path, trial_path.status
 
+def staple_wf(
+    ens_set: Dict[str, Any],
+    trial_path: InfPath,
+    engine: EngineBase,
+    start_cond: Tuple[str, ...] = ("L",),
+) -> Tuple[bool, InfPath, str]:
+    #TODO
+    """Perform a Wire Fencing move from an initial path.
 
+    Args:
+        ens_set: Ensemble settings.
+        trial_path: The path to perform the move from.
+        engine: The MD engine used for propagating.
+        start_cond: The starting condition for the ensemble as
+            left ("L") or right ("R").
+
+    Returns:
+        A tuple containing:
+            - True if the path can be accepted, False otherwise.
+            - The generated path.
+            - A string representing the status of the path.
+
+    """
+    intf_cap = ens_set["tis_set"].get(
+        "interface_cap",
+        ens_set["interfaces"][2],
+    )
+    wf_int = list([ens_set["interfaces"][1]] * 2) + [intf_cap]
+    n_frames, new_segment = wirefence_weight_and_pick(
+        trial_path, wf_int[0], wf_int[2], return_seg=True, ens_set=ens_set
+    )
+
+    # Check if no frames to shoot from
+    if n_frames == 0:
+        logger.warning("Wire fencing move not usable. N frames of Path = 0")
+        logger.warning(f"between interfaces {wf_int[0]} and {wf_int[-1]}.")
+        return False, trial_path, "NSG"
+
+    sub_ens = {
+        "interfaces": wf_int,
+        "rgen": ens_set["rgen"],
+        "ens_name": ens_set["ens_name"],
+        "start_cond": ens_set["start_cond"],
+        "tis_set": ens_set["tis_set"],
+    }
+    sub_ens["tis_set"]["allowmaxlength"] = True
+    sub_ens["tis_set"]["maxlength"] = ens_set["tis_set"]["maxlength"]
+
+    succ_seg = 0
+    for i in range(ens_set["tis_set"].get("n_jumps", 2)):
+        logger.debug("Trying a new web with Wire Fencing, jump %i", i)
+        success, trial_seg, status = shoot(
+            sub_ens, new_segment, engine, start_cond=("L", "R")
+        )
+        start, end, _, _ = trial_seg.check_interfaces(wf_int)
+        logger.info(
+            f"Jump {i}, len {trial_seg.length}, status"
+            + f"{status}, intf: {start} {end}"
+        )
+        if not success:
+            # This handles R to R (start_cond = L) paths. Counter + 1, no ups.
+            logger.debug("Wire Fencing Fail.")
+        else:
+            logger.debug("Acceptable Wire Fence link.")
+            succ_seg += 1
+            new_segment = trial_seg.copy()
+    if succ_seg == 0:
+        # No usable segments were generated.
+        trial_path.status = "NSG"
+        success = False
+    else:
+        success, trial_path, _ = extender(
+            new_segment, engine, ens_set, start_cond
+        )
+    if success:
+        success, trial_path = subt_acceptance(
+            trial_path, ens_set, engine, start_cond
+        )
+
+    trial_path.generated = ("wf", 9000, succ_seg, trial_path.length)
+
+    logger.debug("WF move %s", trial_path.status)
+    if not success:
+        return False, trial_path, trial_path.status
+
+    # This might get triggered when accepting 0-L paths.
+    left, _, right = ens_set["interfaces"]
+    # TODO: check this
+    # print(start_cond, tuple(trial_path.get_start_point(left, right)))
+    assert set(start_cond) == set(
+        trial_path.get_start_point(left, right)
+    ), "WF: Path has an implausible start."
+
+    trial_path.status = "ACC"
+    return True, trial_path, trial_path.status

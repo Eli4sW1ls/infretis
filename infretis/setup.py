@@ -11,6 +11,7 @@ from infretis.classes.formatter import get_log_formatter
 from infretis.classes.path import load_paths_from_disk
 from infretis.classes.repex import REPEX_state
 from infretis.classes.repex_pp import REPEX_state_pp
+from infretis.classes.repex_staple import REPEX_state_staple
 from infretis.core.tis import def_globals, run_md
 
 logger = logging.getLogger("main")
@@ -40,9 +41,10 @@ def setup_internal(config: dict) -> Tuple[dict, REPEX_state | REPEX_state_pp]:
 
     # setup repex
     # if mode pp:
-    pp = config.get("simulation", {}).get("mode", False) == "pp"
     if config.get("simulation", {}).get("mode", False) == "pp":
         state = REPEX_state_pp(config, minus=True)
+    elif config.get("simulation", {}).get("mode", False) == "staple":
+        state = REPEX_state_staple(config, minus=True)
     else:
         state = REPEX_state(config, minus=True)
 

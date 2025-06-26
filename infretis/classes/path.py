@@ -425,8 +425,8 @@ def load_path(pdir: str) -> Path:
     """Load a path from the given directory."""
     trajtxt = os.path.join(pdir, "traj.txt")
     ordertxt = os.path.join(pdir, "order.txt")
-    assert os.path.isfile(trajtxt)
-    assert os.path.isfile(ordertxt)
+    assert os.path.isfile(trajtxt), f"Trajectory file {trajtxt} does not exist."
+    assert os.path.isfile(ordertxt), f"Order file {ordertxt} does not exist."
 
     # load trajtxt
     with PathExtFile(trajtxt, "r") as trajfile:
@@ -443,7 +443,7 @@ def load_path(pdir: str) -> Path:
             traj["data"][i][3] = reverse
 
         for config in set(frame[1] for frame in traj["data"]):
-            assert os.path.isfile(config)
+            assert os.path.isfile(config), f"Config file {config} does not exist."
 
     # load ordertxt
     with OrderPathFile(ordertxt, "r") as orderfile:
