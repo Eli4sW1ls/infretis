@@ -383,6 +383,55 @@ class StaplePath(Path):
                     return False
         return True
 
+def turn_detected(phasepoints: List[System], interfaces: List[float], lr: int) -> bool:
+    """Check if a turn is detected in the given phasepoints.
+
+    A turn is detected if the trajectory crosses at least two interfaces
+    in one direction and recrosses back past the initial interface.
+
+    Args:
+        phasepoints: List of phasepoints representing the trajectory.
+        interfaces: List of interface positions in ascending order.
+        lr: Location indicator (-1 for left, 1 for right).
+
+    Returns:
+        True if a turn is detected, False otherwise.
+    """
+    if not phasepoints or not interfaces or lr is None:
+        logger.warning("Invalid input for turn detection.")
+        raise ValueError("Invalid input for turn detection.")
+    
+    if len(phasepoints) < 2:
+        return False
+
+    start_op = phasepoints[0].order[0]
+    end_op = phasepoints[-1].order[0]
+    ops = [phasepoints[i].order for i in range(len(phasepoints))]
+
+    # Check if already outside interface boundaries
+    if start_op <= interfaces[0] or end_op >= interfaces[-1]:
+        return True
+    
+    # Find extreme value in the appropriate direction
+    extr_op = max(ops) if lr==1 else min(ops)
+    
+    # Find eligible interfaces for detecting turns
+    elig_intfs = [int for int in interfaces if lr*int <= lr*extr_op[0]]
+    # extr_idx = intfs.index(elig_intfs[np.abs(elig_intfs - extr_op).argmin()])
+    # cond_intf = elig_intfs[np.abs(elig_intfs - extr_op).argmin()-lr]
+    cond_intf = elig_intfs[1 if lr==-1 else -2]
+    
+    # If we're still at the extreme point, no turn detected
+    if ops[-1] == extr_op or extr_op is None:
+        return False
+
+    # extr_intf = intfs[extr_idx]
+    ops_elig = np.array([op[0] for op in ops[ops.index(extr_op):]])
+    
+    # Check if any of these points cross back over the condition interface
+    return np.any(lr*ops_elig < lr*cond_intf)
+
+    
 def paste_paths(
     path_back: Path,
     path_forw: Path,

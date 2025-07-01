@@ -190,7 +190,7 @@ class ASEEngine(EngineBase):
                 }
                 phase_point = self.snapshot_to_system(system, snapshot)
                 status, success, stop, add = self.add_to_path(
-                    path, phase_point, left, right
+                    path, phase_point, left, right, ens_set.get("all_intfs", None)
                 )
 
                 if stop:

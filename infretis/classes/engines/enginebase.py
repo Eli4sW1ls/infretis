@@ -19,6 +19,7 @@ from infretis.classes.formatter import FileIO, OutputFormatter
 if TYPE_CHECKING:  # pragma: no cover
     from infretis.classes.orderparameter import OrderParameter
     from infretis.classes.path import Path as InfPath
+    from infretis.classes.staple_path import StaplePath, turn_detected
     from infretis.classes.system import System
 
 
@@ -76,7 +77,7 @@ class EngineBase(metaclass=ABCMeta):
 
     @staticmethod
     def add_to_path(
-        path: InfPath, phase_point: System, left: float, right: float
+        path: InfPath, phase_point: System, left: float, right: float, interfaces: List[float]=None
     ) -> Tuple[str, bool, bool, bool]:
         """Add a phase point and perform some checks.
 
@@ -100,14 +101,31 @@ class EngineBase(metaclass=ABCMeta):
                 status = "Could not add for unknown reason"
             success = False
             stop = True
-        if path.phasepoints[-1].order[0] < left:
-            status = "Crossed left interface!"
-            success = True
-            stop = True
-        elif path.phasepoints[-1].order[0] > right:
-            status = "Crossed right interface!"
-            success = True
-            stop = True
+        if isinstance(path, StaplePath) and interfaces:
+            if path.phasepoints[-1].order[0] < interfaces[0]:
+                status = "Crossed into A!"
+                success = True
+                stop = True
+            elif path.phasepoints[-1].order[0] > interfaces[-1]:
+                status = "Crossed into B!"
+                success = True
+                stop = True
+            # If we are using a StaplePath, we need to check the order:
+            elif turn_detected(path.phasepoints, interfaces, 
+                               -1 if path.phasepoints[1].order[0] < left else (1 if path.phasepoints[1].order[0] > right else None)):
+                status = "Order parameter is not monotonic!"
+                success = True
+                stop = True
+        else:
+            if path.phasepoints[-1].order[0] < left:
+                status = "Crossed left interface!"
+                success = True
+                stop = True
+            elif path.phasepoints[-1].order[0] > right:
+                status = "Crossed right interface!"
+                success = True
+                stop = True
+
         if path.length == path.maxlen:
             status = "Max. path length exceeded!"
             success = False

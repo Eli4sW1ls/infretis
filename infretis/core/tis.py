@@ -1735,7 +1735,6 @@ def staple_sh(
     if int(ens_set["ens_name"]) == 0:
         raise NotImplementedError("Staple paths in [0-] is not implemented.")
     
-    interfaces = ens_set["all_intfs"]
     intfs_pp = ens_set["interfaces"]
     # the trial path we will generate
     trial_path = path.empty_path(maxlen=ens_set["tis_set"]["maxlength"])
@@ -1879,7 +1878,7 @@ def staple_sh(
     
     # Start extending the path:
     success, trial_path, _ = staple_extender(
-        trial_path, pptype, engine, ens_set, start_cond
+        trial_path, pptype, engine, ens_set
     )
     trial_path.status = "ACC"
 
@@ -1988,7 +1987,6 @@ def staple_extender(
     partial_path_type: Tuple[str, ...],
     engine: EngineBase,
     ens_set: Dict[str, Any],
-    start_cond: Tuple[str, ...] = ("R", "L"),
 ) -> Tuple[bool, InfPath, str]:
     """Extend a path segment backward and forward in time.
 
@@ -1996,8 +1994,6 @@ def staple_extender(
         source_seg: The path (segment) to extend.
         engine: The MD engine used for propagating.
         ens_set: Ensemble settings.
-        start_cond: The starting condition for the ensemble as
-            left ("L") or right ("R").
 
     Returns:
         A tuple containing:
@@ -2005,9 +2001,6 @@ def staple_extender(
             - The generated path.
             - A string representing the status of the path.
     """
-    interfaces = ens_set["interfaces"]
-    # prop_pt = source_seg.phasepoints[0].copy()
-
     # Extender
     if partial_path_type == "LML" or partial_path_type == "RMR":
         # This is a path that starts on the left and ends on the right
@@ -2070,7 +2063,7 @@ def staple_extender(
         bw_turn.append(source_seg.phasepoints[1].copy())
         bw_turn.append(prop_point)
 
-        success_turn, _ = engine.propagate_st(
+        success_turn, _ = engine.propagate(
             bw_turn, ens_set, prop_point, reverse=True)
         if not success_turn:
             logger.debug("Failed to propagate to the turn point.")
@@ -2096,7 +2089,7 @@ def staple_extender(
         fw_turn.append(source_seg.phasepoints[-2].copy())
         fw_turn.append(prop_point)
 
-        success_turn, _ = engine.propagate_st(
+        success_turn, _ = engine.propagate(
             fw_turn, ens_set, prop_point, reverse=False)
         if not success_turn:
             logger.debug("Failed to propagate to the turn point.")
