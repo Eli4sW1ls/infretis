@@ -329,25 +329,27 @@ class REPEX_state_staple(REPEX_state):
         ens_intfs = []
 
         # set intfs for [0-] and [0+]
-        ens_intfs.append([float("-inf"), intfs[0], intfs[0]])
-        ens_intfs.append([intfs[0], intfs[0], intfs[1]])
+        if lambda_minus_one is not False:
+            ens_intfs.append(
+                [lambda_minus_one, (lambda_minus_one + intfs[0]) / 2, intfs[0]]
+            )
+        else:
+            ens_intfs.append([float("-inf"), intfs[0], intfs[0]])
+        ens_intfs.append([intfs[0], intfs[0], intfs[-1]])
 
         # set interfaces and set detect for [1+], [2+], ...
         # reactant, product = intfs[0], intfs[-1]
         for i in range(len(intfs) - 2):
-            middle = intfs[i + 1]
             ens_intfs.append([intfs[i], intfs[i + 1], intfs[i + 2]])
-
-        self.config["simulation"]["shooting_moves"] = ["st_" + str(mv) 
-                                                       for mv in self.config["simulation"]["shooting_moves"]]
 
         # create all path ensembles
         pensembles = {}
         for i, ens_intf in enumerate(ens_intfs):
             pensembles[i] = {
                 "interfaces": tuple(ens_intf),
+                "all_intfs": tuple(self.interfaces),
                 "tis_set": self.config["simulation"]["tis_set"],
-                "mc_move": self.config["simulation"]["shooting_moves"][i],
+                "mc_move": "st_" + str(self.config["simulation"]["shooting_moves"][i]) if i > 0 else self.config["simulation"]["shooting_moves"][i],
                 "ens_name": f"{i:03d}",
                 "must_cross_M": True if i > 0 else False,
                 "start_cond": "R" if not lambda_minus_one and i == 0 else ["L", "R"],

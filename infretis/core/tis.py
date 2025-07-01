@@ -430,7 +430,7 @@ def shoot(
     trial_path = paste_paths(
         path_back,
         path_forw,
-        overlap=True,
+        overlap=1,
         maxlen=ens_set["tis_set"]["maxlength"],
     )
 
@@ -676,7 +676,7 @@ def extender(
         trial_path = paste_paths(
             back_segment,
             source_seg,
-            overlap=True,
+            overlap=1,
             maxlen=ens_set["tis_set"]["maxlength"],
         )
     else:
@@ -1553,10 +1553,10 @@ def ppretis_swap(
     # Finally, patch together
     if allowed3:
         path0 = paste_paths(path_tmp, path_tmp0,
-                            overlap=False, maxlen=maxlen0)
+                            overlap=0, maxlen=maxlen0)
     elif allowed4:
         path0 = paste_paths(path_tmp0, path_tmp,
-                            overlap=False, maxlen=maxlen0)
+                            overlap=0, maxlen=maxlen0)
 
     # acceptance
     path0.status = 'ACC'
@@ -1633,10 +1633,10 @@ def ppretis_swap(
     # patch together
     if allowed1:
         path1 = paste_paths(path_tmp, path_tmp0,
-                            overlap=False, maxlen=maxlen1)
+                            overlap=0, maxlen=maxlen1)
     elif allowed2:
         path1 = paste_paths(path_tmp0, path_tmp,
-                            overlap=False, maxlen=maxlen1)
+                            overlap=0, maxlen=maxlen1)
 
     # acceptance
     path1.status = 'ACC'
@@ -1732,15 +1732,27 @@ def staple_sh(
             - A string representing the status of the path.
 
     """
-    interfaces = ens_set["interfaces"]
+    if int(ens_set["ens_name"]) == 0:
+        raise NotImplementedError("Staple paths in [0-] is not implemented.")
+    
+    interfaces = ens_set["all_intfs"]
+    intfs_pp = ens_set["interfaces"]
     # the trial path we will generate
     trial_path = path.empty_path(maxlen=ens_set["tis_set"]["maxlength"])
     if shooting_point is None:
-        shooting_point, idx, dek = prepare_shooting_point(
-            path, ens_set["rgen"], engine, ens_set
-        )
+        # ppath = path.get_pp_path(ens_set)
+        try:
+            shooting_point, idx, dek = prepare_shooting_point(
+                path, ens_set["rgen"], engine, ens_set
+            )
+        except ValueError as e:
+            logger.error("Error preparing shooting point: %s", e)
+            ppath = path.get_pp_path(ens_set)
+            shooting_point, idx, dek = prepare_shooting_point(
+                ppath, ens_set["rgen"], engine, ens_set
+            )
         kick = check_kick(
-            shooting_point, interfaces, trial_path, ens_set["rgen"], dek
+            shooting_point, intfs_pp, trial_path, ens_set["rgen"], dek
         )
     else:
         kick = True
@@ -1763,7 +1775,7 @@ def staple_sh(
         maxlen = ens_set["tis_set"]["maxlength"]
     else:
         maxlen = min(
-            int((path.length - 2) / ens_set["rgen"].random()) + 2,
+            int((path.sh_region[1] - path.sh_region[0] + 1) / ens_set["rgen"].random()) + 2,
             ens_set["tis_set"]["maxlength"],
         )
     # Since the forward path must be at least one step, the maximum
@@ -1803,7 +1815,7 @@ def staple_sh(
     trial_path = paste_paths(
         path_back,
         path_forw,
-        overlap=True,
+        overlap=1,
         maxlen=ens_set["tis_set"]["maxlength"],
     )
 
@@ -1827,13 +1839,14 @@ def staple_sh(
         return False, trial_path, trial_path.status
 
     trial_path.weight = 1.0
+    pptype = trial_path.check_interfaces(intfs_pp)
 
     # Deal with the rejections for path properties.
     # Make sure we did not hit the left interface on {0-}
     # Which is the only ensemble that allows paths starting in R
     if (
         "L" not in set(start_cond)
-        and "L" in trial_path.check_interfaces(interfaces)[:2]
+        and "L" in pptype[:2]
     ):
         trial_path.status = "0-L"
         return False, trial_path, trial_path.status
@@ -1842,7 +1855,7 @@ def staple_sh(
     if "must_cross_M" in ens_set and ens_set["must_cross_M"]: # not for [0-]
 
         # detect if: minorder < middle interf <= maxorder
-        if not trial_path.check_interfaces(interfaces)[-1][1]:
+        if not pptype[-1][1]:
             trial_path.status = 'NCR'
             return False, trial_path, trial_path.status
 
@@ -1850,23 +1863,27 @@ def staple_sh(
             # if we do cross middle interface
             # path still has to come from left or right
             # so we need cross[0] or cross[2] to be true
-            if not (trial_path.check_interfaces(interfaces)[-1][0] or
-                    trial_path.check_interfaces(interfaces)[-1][2]):
+            if not (pptype[-1][0] or
+                    pptype[-1][2]):
                 trial_path.status = 'NCR'
                 return False, trial_path, trial_path.status
-
-
 
     # Don't do this for paths that can start everywhere
     start_cond = ens_set.get("start_cond", start_cond)
     if set(("R", "L")) == set(start_cond):
         pass
-    elif not trial_path.check_interfaces(interfaces)[-1][1]:
+    elif not pptype[-1][1]:
         # No, we did not cross the middle interface:
         trial_path.status = "NCR"
         return False, trial_path, trial_path.status
-
+    
+    # Start extending the path:
+    success, trial_path, _ = staple_extender(
+        trial_path, pptype, engine, ens_set, start_cond
+    )
     trial_path.status = "ACC"
+
+    
 
     return True, trial_path, trial_path.status
 
@@ -1965,3 +1982,145 @@ def staple_wf(
 
     trial_path.status = "ACC"
     return True, trial_path, trial_path.status
+
+def staple_extender(
+    source_seg: InfPath,
+    partial_path_type: Tuple[str, ...],
+    engine: EngineBase,
+    ens_set: Dict[str, Any],
+    start_cond: Tuple[str, ...] = ("R", "L"),
+) -> Tuple[bool, InfPath, str]:
+    """Extend a path segment backward and forward in time.
+
+    Args:
+        source_seg: The path (segment) to extend.
+        engine: The MD engine used for propagating.
+        ens_set: Ensemble settings.
+        start_cond: The starting condition for the ensemble as
+            left ("L") or right ("R").
+
+    Returns:
+        A tuple containing:
+            - True if the path can be accepted, False otherwise.
+            - The generated path.
+            - A string representing the status of the path.
+    """
+    interfaces = ens_set["interfaces"]
+    # prop_pt = source_seg.phasepoints[0].copy()
+
+    # Extender
+    if partial_path_type == "LML" or partial_path_type == "RMR":
+        # This is a path that starts on the left and ends on the right
+        # or vice versa, so we can only extend it in one direction.
+        prop_idx = np.random.choice([0, -1])  # Choose which endpoint to extend from
+        rev = not prop_idx  # Determine propagation direction (True or False)
+        prop_point = source_seg.phasepoints[prop_idx].copy()  # Get the endpoint phasepoint
+
+        turn_seg = source_seg.empty_path(
+            maxlen=ens_set["tis_set"]["maxlength"]
+        )
+        if rev:
+            turn_seg.append(source_seg.phasepoints[1].copy())
+            turn_seg.append(prop_point)
+        else:
+            turn_seg.append(source_seg.phasepoints[-2].copy())
+            turn_seg.append(prop_point)
+
+        logger.debug(f"[{partial_path_type}] Propagating backwards until turn.")
+        turn_seg.time_origin = source_seg.time_origin
+        success_turn, _ = engine.propagate_st(
+            turn_seg, ens_set, prop_point, reverse=rev)
+        
+        if not success_turn:
+            logger.debug("Failed to propagate to the turn point.")
+            turn_seg.status = ("B" if rev else "F") + "TL"
+            source_seg += turn_seg
+            if turn_seg.length >= ens_set["tis_set"]["maxlength"]:
+                source_seg.status = ("B" if rev else "F") + "TX"
+            return False, source_seg, source_seg.status
+        # TODO: extra check?
+        if rev:
+            full_staple = paste_paths(
+                turn_seg,
+                source_seg,
+                overlap=2,
+                maxlen=ens_set["tis_set"]["maxlength"],
+            )
+            if full_staple.length >= ens_set["tis_set"]["maxlength"]:
+                full_staple.status = "BTX"
+                success = False
+        else:
+            full_staple = source_seg.copy()
+            for phasepoint in turn_seg.phasepoints:
+                app = full_staple.append(phasepoint)
+                if not app:
+                    msg = "Truncated while pasting forwards at: {}"
+                    msg = msg.format(full_staple.length)
+                    logger.warning(msg)
+                    full_staple.status = "FTX"
+                    success = False
+    
+    else:
+        bw_turn = source_seg.empty_path(
+            maxlen=ens_set["tis_set"]["maxlength"]
+        )
+        logger.debug(f"[{partial_path_type}] Propagating backwards until turn.")
+        bw_turn.time_origin = source_seg.time_origin
+        prop_point = source_seg.phasepoints[0].copy()
+        bw_turn.append(source_seg.phasepoints[1].copy())
+        bw_turn.append(prop_point)
+
+        success_turn, _ = engine.propagate_st(
+            bw_turn, ens_set, prop_point, reverse=True)
+        if not success_turn:
+            logger.debug("Failed to propagate to the turn point.")
+            bw_turn.status = "BTL"
+            source_seg += bw_turn
+            if (source_seg.length + bw_turn.length -2) >= ens_set["tis_set"]["maxlength"]:
+                source_seg.status = "BTX"
+            return False, source_seg, source_seg.status
+        
+        full_staple = paste_paths(
+            bw_turn,
+            source_seg,
+            overlap=2,
+            maxlen=ens_set["tis_set"]["maxlength"],
+        )
+
+        fw_turn = source_seg.empty_path(
+            maxlen=ens_set["tis_set"]["maxlength"]
+        )
+        logger.debug(f"[{partial_path_type}] Propagating forwards until turn.")
+        fw_turn.time_origin = source_seg.time_origin
+        prop_point = source_seg.phasepoints[-1].copy()
+        fw_turn.append(source_seg.phasepoints[-2].copy())
+        fw_turn.append(prop_point)
+
+        success_turn, _ = engine.propagate_st(
+            fw_turn, ens_set, prop_point, reverse=False)
+        if not success_turn:
+            logger.debug("Failed to propagate to the turn point.")
+            fw_turn.status = "FTL"
+            full_staple += fw_turn
+            if (full_staple.length + fw_turn.length -2) >= ens_set["tis_set"]["maxlength"]:
+                full_staple.status = "FTX"
+            return False, full_staple, full_staple.status
+        
+        for phasepoint in fw_turn.phasepoints[2:]:
+            app = full_staple.append(phasepoint)
+            if not app:
+                msg = "Truncated while pasting forwards at: {}"
+                msg = msg.format(full_staple.length)
+                logger.warning(msg)
+                full_staple.status = "FTX"
+                success = False
+        
+    # Check if the length of the full staple exceeds the maximum allowed length
+    if full_staple.length >= ens_set["tis_set"]["maxlength"]:
+        full_staple.status = "FTX"
+        success = False
+
+    full_staple.status = "ACC"
+    success = True  
+
+    return success, full_staple, full_staple.status

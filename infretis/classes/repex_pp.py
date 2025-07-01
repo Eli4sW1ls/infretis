@@ -407,8 +407,13 @@ class REPEX_state_pp(REPEX_state):
         ens_intfs = []
 
         # set intfs for [0-] and [0+]
-        ens_intfs.append([float("-inf"), intfs[0], intfs[0]])
-        ens_intfs.append([intfs[0], intfs[0], intfs[1]])
+        if lambda_minus_one is not False:
+            ens_intfs.append(
+                [lambda_minus_one, (lambda_minus_one + intfs[0]) / 2, intfs[0]]
+            )
+        else:
+            ens_intfs.append([float("-inf"), intfs[0], intfs[0]])
+        ens_intfs.append([intfs[0], intfs[0], intfs[-1]])
 
         # set interfaces and set detect for [1+], [2+], ...
         # reactant, product = intfs[0], intfs[-1]

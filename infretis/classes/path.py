@@ -352,7 +352,7 @@ class Path:
 def paste_paths(
     path_back: Path,
     path_forw: Path,
-    overlap: bool = True,
+    overlap: int = 1,
     maxlen: Optional[int] = None,
 ) -> Path:
     """Merge a backward with a forward path into a new path.
@@ -409,8 +409,8 @@ def paste_paths(
             logger.warning(msg)
             return new_path
     first = True
-    for phasepoint in path_forw.phasepoints:
-        if first and overlap:
+    for i, phasepoint in enumerate(path_forw.phasepoints, start=1):
+        if first and i == overlap:
             first = False
             continue
         app = new_path.append(phasepoint)

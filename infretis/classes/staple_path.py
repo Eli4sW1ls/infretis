@@ -253,10 +253,23 @@ class StaplePath(Path):
         end_turn_info = (end_turn, end_interface_idx, end_extremal_idx)
         
         return start_turn_info, end_turn_info, valid
+    
+    def get_shooting_point(self, rgen: Generator) -> Tuple[System, int]:
+        """Pick a random shooting point from the path."""
+        ### TODO: probably need an unittest for this to check if correct.
+        ### idx = rgen.random_integers(1, self.length - 2)
+        if self.sh_region is None:
+            logger.warning("No shooting region defined, cannot select a shooting point.")
+            raise ValueError("Shooting region is not defined.")
+        idx = rgen.integers(self.sh_region[0], self.sh_region[1], endpoint=True)
+        order = self.phasepoints[idx].order[0]
+        logger.debug(f"Selected point with orderp {order}")
+        return self.phasepoints[idx], idx
 
-    def get_pp_path(self, ens: Dict, interfaces: List[float] = None) -> Path:
+    def get_pp_path(self, ens: Dict) -> Path:
         """Return the (RE)PPTIS part of the staple path."""
         new_path = self.empty_path(maxlen=self.maxlen)
+        interfaces = ens["all_intfs"]
         pp_intfs = ens["interfaces"]
         if len(pp_intfs) != 3:
             logger.warning(
@@ -264,6 +277,7 @@ class StaplePath(Path):
             )
             return None
 
+        #TODO: add [0-] case
         if self.sh_region is None or len(self.sh_region) != 2:
             # TODO: add helper function
             logger.debug("No shooting region defined, inducing sh_region from path.")
@@ -290,17 +304,17 @@ class StaplePath(Path):
             new_path.append(phasep.copy())
         return new_path
 
-    def get_shooting_point(self, ens: Dict, rgen: Generator, interfaces: List[float]=None
-                           ) -> Tuple[System, int]:
-        """Pick a random shooting point from the path."""
-        ### TODO: probably need an unittest for this to check if correct.
-        ### idx = rgen.random_integers(1, self.length - 2)
-        ppath = self.get_pp_path(ens, interfaces)
+    # def get_shooting_point(self, ens: Dict, rgen: Generator,
+    #                        ) -> Tuple[System, int]:
+    #     """Pick a random shooting point from the path."""
+    #     ### TODO: probably need an unittest for this to check if correct.
+    #     ### idx = rgen.random_integers(1, self.length - 2)
+    #     ppath = self.get_pp_path(ens)
 
-        idx = rgen.integers(1, ppath.length - 1)
-        order = ppath.phasepoints[idx].order[0]
-        logger.debug(f"Selected point with orderp {order}")
-        return ppath.phasepoints[idx], self.sh_region[0] + idx - 1
+    #     idx = rgen.integers(1, ppath.length - 1)
+    #     order = ppath.phasepoints[idx].order[0]
+    #     logger.debug(f"Selected point with orderp {order}")
+    #     return ppath.phasepoints[idx], self.sh_region[0] + idx - 1
 
     def copy(self) -> Path:
         """Return a copy of this path."""
@@ -316,6 +330,11 @@ class StaplePath(Path):
         new_path.sh_region = self.sh_region
         new_path.meta = self.meta
         return new_path
+    
+    def empty_path(self, maxlen=DEFAULT_MAXLEN, **kwargs) -> StaplePath:
+        """Return an empty path of same class as the current one."""
+        time_origin = kwargs.get("time_origin", 0)
+        return self.__class__(maxlen=maxlen, time_origin=time_origin)
 
     def __eq__(self, other) -> bool:
         """Check if two paths are equal."""
