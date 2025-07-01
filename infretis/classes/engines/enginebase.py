@@ -102,6 +102,8 @@ class EngineBase(metaclass=ABCMeta):
             success = False
             stop = True
         if isinstance(path, StaplePath) and interfaces:
+            op_loc = path.phasepoints[1].order[0]
+            m_idx = np.argwhere(left < np.array(interfaces) < right)[0]
             if path.phasepoints[-1].order[0] < interfaces[0]:
                 status = "Crossed into A!"
                 success = True
@@ -111,8 +113,8 @@ class EngineBase(metaclass=ABCMeta):
                 success = True
                 stop = True
             # If we are using a StaplePath, we need to check the order:
-            elif turn_detected(path.phasepoints, interfaces, 
-                               -1 if path.phasepoints[1].order[0] < left else (1 if path.phasepoints[1].order[0] > right else None)):
+            elif turn_detected(path.phasepoints, interfaces, m_idx
+                               -1 if op_loc < left else (1 if op_loc > right else None)):
                 status = "Order parameter is not monotonic!"
                 success = True
                 stop = True

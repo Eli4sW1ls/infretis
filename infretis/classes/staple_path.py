@@ -383,7 +383,7 @@ class StaplePath(Path):
                     return False
         return True
 
-def turn_detected(phasepoints: List[System], interfaces: List[float], lr: int) -> bool:
+def turn_detected(phasepoints: List[System], interfaces: List[float], m_idx: int, lr: int) -> bool:
     """Check if a turn is detected in the given phasepoints.
 
     A turn is detected if the trajectory crosses at least two interfaces
@@ -409,7 +409,7 @@ def turn_detected(phasepoints: List[System], interfaces: List[float], lr: int) -
     ops = [phasepoints[i].order for i in range(len(phasepoints))]
 
     # Check if already outside interface boundaries
-    if start_op <= interfaces[0] or end_op >= interfaces[-1]:
+    if start_op <= interfaces[0] or end_op >= interfaces[-1] or lr*end_op <= lr*interfaces[m_idx]:
         return True
     
     # Find extreme value in the appropriate direction
@@ -429,7 +429,7 @@ def turn_detected(phasepoints: List[System], interfaces: List[float], lr: int) -
     ops_elig = np.array([op[0] for op in ops[ops.index(extr_op):]])
     
     # Check if any of these points cross back over the condition interface
-    return np.any(lr*ops_elig < lr*cond_intf)
+    return np.any(lr*ops_elig <= lr*cond_intf)
 
     
 def paste_paths(
