@@ -31,6 +31,19 @@ class System:
         self.box: Optional[np.ndarray] = np.zeros((3, 3))
         self.temperature: Dict[str, float] = {}
 
+    def __eq__(self, other):
+        """Check if two systems are equal."""
+        if not isinstance(other, System):
+            return False
+        return (self.config == other.config and
+                np.array_equal(self.pos, other.pos) and
+                np.array_equal(self.vel, other.vel) and
+                self.vel_rev == other.vel_rev and
+                self.ekin == other.ekin and
+                self.vpot == other.vpot and
+                np.array_equal(self.box, other.box) and
+                self.temperature == other.temperature)
+
     def copy(self) -> System:
         """Return a copy of this system."""
         system_copy = copy(self)

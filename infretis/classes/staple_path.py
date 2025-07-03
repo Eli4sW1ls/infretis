@@ -7,6 +7,7 @@ import os
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
+from numpy.typing import ArrayLike
 
 from infretis.classes.path import Path, DEFAULT_MAXLEN
 from infretis.classes.formatter import (
@@ -55,7 +56,8 @@ class StaplePath(Path):
         """
         if self.length < 2:
             return False, None, None
-            
+        
+        interfaces = np.array(interfaces)
         intfs_min, intfs_max = min(interfaces), max(interfaces)
         start_op = self.phasepoints[0].order[0]
         
@@ -84,6 +86,7 @@ class StaplePath(Path):
                     initial_interface_idx = i
                     break
         
+        initial_interface = interfaces[initial_interface_idx]
         # Scan forward from start to find valid turn
         for idx in range(1, self.length):
             current_val = self.phasepoints[idx].order[0]
@@ -96,7 +99,6 @@ class StaplePath(Path):
             
             # Check if we've recrossed the initial interface (turn completed)
             if initial_interface_idx != -1:
-                initial_interface = interfaces[initial_interface_idx]
                 recrossed = (
                     (start_increasing and current_val <= initial_interface < max_deviation) or 
                     (not start_increasing and current_val >= initial_interface > max_deviation)
@@ -108,7 +110,8 @@ class StaplePath(Path):
                     interfaces_crossed = np.sum((interfaces > min_val) & (interfaces < max_val))
                     
                     if interfaces_crossed >= 2:
-                        return True, initial_interface_idx, extremal_idx
+                        turn_interface_idx = initial_interface_idx + 1 if start_increasing else initial_interface_idx - 1
+                        return True, turn_interface_idx, extremal_idx
         
         return False, None, None
 
@@ -134,6 +137,7 @@ class StaplePath(Path):
         if self.length < 2:
             return False, None, None
             
+        interfaces = np.array(interfaces)
         intfs_min, intfs_max = min(interfaces), max(interfaces)
         end_op = self.phasepoints[-1].order[0]
         
@@ -160,6 +164,7 @@ class StaplePath(Path):
                     initial_interface_idx = i
                     break
         
+        initial_interface = interfaces[initial_interface_idx]
         # Scan backward from end to find valid turn
         for idx in range(self.length-2, -1, -1):
             current_val = self.phasepoints[idx].order[0]
@@ -172,7 +177,6 @@ class StaplePath(Path):
             
             # Check if we've recrossed the initial interface (turn completed)
             if initial_interface_idx != -1:
-                initial_interface = interfaces[initial_interface_idx]
                 recrossed = (
                     (end_increasing and current_val <= initial_interface < max_deviation) or 
                     (not end_increasing and current_val >= initial_interface > max_deviation)
@@ -184,7 +188,8 @@ class StaplePath(Path):
                     interfaces_crossed = np.sum((interfaces > min_val) & (interfaces < max_val))
                     
                     if interfaces_crossed >= 2:
-                        return True, initial_interface_idx, extremal_idx
+                        turn_interface_idx = initial_interface_idx + 1 if end_increasing else initial_interface_idx - 1
+                        return True, turn_interface_idx, extremal_idx
         
         return False, None, None
 
@@ -276,6 +281,8 @@ class StaplePath(Path):
                 "Path does not have 3 interfaces, cannot extract (RE)PPTIS part."
             )
             return None
+        
+        valid_pp = False
 
         #TODO: add [0-] case
         if self.sh_region is None or len(self.sh_region) != 2:
@@ -290,17 +297,36 @@ class StaplePath(Path):
             new_path.maxlen = self.maxlen
             new_path.path_number = self.path_number
             new_path.weights = self.weights
-            
-            valid_pp = False
-            while not valid_pp:
-                left_border = next(self.phasepoints[start_info[2] + p].order[0] for p in range(end_info[2] - start_info[2] + 1) if self.phasepoints[start_info[2] + p].order[0] >= pp_intfs[0])
-                right_border = next(self.phasepoints[left_border + p].order[0] for p in range(end_info[2] - left_border + 1) if pp_intfs[2] <= self.phasepoints[left_border + p].order[0] <= pp_intfs[0])
-                valid_pp = next((True for p in range(1, right_border - left_border + 1) if np.sign(self.phasepoints[left_border + p] - pp_intfs[1]) != np.sign(self.phasepoints[left_border + p - 1] - pp_intfs[1])), False)
-            
+
+            if pp_intfs[1] < self.phasepoints[end_info[2]].order[0] < pp_intfs[2]:   # LML end
+                left_border = next(end_info[2] - p for p in range(end_info[2] + 1) if self.phasepoints[end_info[2] - p].order[0] <= pp_intfs[0]) + 1
+                right_border = next(end_info[2] + p for p in range(end_info[2] - start_info[2] + 1) if self.phasepoints[end_info[2] + p].order[0] <= pp_intfs[0]) - 1
+                assert right_border == self.length - 2, f"Right border {right_border} does not match expected length {self.length - 2}."
+            elif pp_intfs[1] < self.phasepoints[start_info[2]].order[0] < pp_intfs[2]:   # LML start
+                left_border = next(start_info[2] - p for p in range(start_info[2] + 1) if self.phasepoints[start_info[2] - p].order[0] <= pp_intfs[0]) + 1
+                right_border = next(start_info[2] + p for p in range(end_info[2] - start_info[2] + 1) if self.phasepoints[start_info[2] + p].order[0] <= pp_intfs[0]) - 1
+                assert left_border == 1, f"Left border {left_border} does not match expected 1."
+            elif pp_intfs[0] < self.phasepoints[start_info[2]].order[0] < pp_intfs[1]:  # RMR start
+                left_border = next(start_info[2] - p for p in range(start_info[2] + 1) if self.phasepoints[start_info[2] - p].order[0] >= pp_intfs[2]) + 1
+                right_border = next(start_info[2] + p for p in range(end_info[2] - start_info[2] + 1) if pp_intfs[0] <= self.phasepoints[start_info[2] + p].order[0] >= pp_intfs[2]) - 1
+                assert left_border == 1, f"Left border {left_border} does not match expected 1."
+            elif pp_intfs[0] < self.phasepoints[end_info[2]].order[0] < pp_intfs[1]:  # RMR end
+                left_border = next(end_info[2] - p for p in range(end_info[2] + 1) if self.phasepoints[end_info[2] - p].order[0] >= pp_intfs[2]) + 1
+                right_border = next(end_info[2] + p for p in range(end_info[2] - start_info[2] + 1) if pp_intfs[0] <= self.phasepoints[end_info[2] + p].order[0] >= pp_intfs[2]) - 1
+                assert right_border == self.length - 2, f"Right border {right_border} does not match expected length {self.length - 2}."
+            else:
+                left_border = next(start_info[2] + p for p in range(end_info[2] - start_info[2] + 1) if pp_intfs[0] < self.phasepoints[start_info[2] + p].order[0] < pp_intfs[2])
+                right_border = next(p for p in range(end_info[2] - left_border + 1) if pp_intfs[2] <= self.phasepoints[left_border + p].order[0] <= pp_intfs[0])            
         else:
             left_border, right_border = self.sh_region
 
-        for phasep in self.phasepoints[left_border-1, right_border+2]:
+        valid_pp = next((True for p in range(1, right_border - left_border + 1) if np.sign(self.phasepoints[left_border + p].order[0] - pp_intfs[1]) != np.sign(self.phasepoints[left_border + p - 1].order[0] - pp_intfs[1])), False)
+        if not valid_pp:
+            logger.warning(
+                "Path does not have valid (RE)PPTIS part, cannot extract it."
+            )
+            return None
+        for phasep in self.phasepoints[left_border-1:right_border+2]:
             new_path.append(phasep.copy())
         return new_path
 
@@ -383,21 +409,22 @@ class StaplePath(Path):
                     return False
         return True
 
-def turn_detected(phasepoints: List[System], interfaces: List[float], m_idx: int, lr: int) -> bool:
+def turn_detected(phasepoints: List[System] | ArrayLike[System], interfaces: List[float], m_idx: int, lr: int) -> bool:
     """Check if a turn is detected in the given phasepoints.
 
     A turn is detected if the trajectory crosses at least two interfaces
     in one direction and recrosses back past the initial interface.
 
     Args:
-        phasepoints: List of phasepoints representing the trajectory.
+        phasepoints: ArrayLike of phasepoints representing the trajectory.
         interfaces: List of interface positions in ascending order.
+        m_idx: Index of the middle PPTIS interface to check for crossing.
         lr: Location indicator (-1 for left, 1 for right).
 
     Returns:
         True if a turn is detected, False otherwise.
     """
-    if not phasepoints or not interfaces or lr is None:
+    if not isinstance(phasepoints, (List, np.ndarray)) or not interfaces or lr is None:
         logger.warning("Invalid input for turn detection.")
         raise ValueError("Invalid input for turn detection.")
     
@@ -430,79 +457,6 @@ def turn_detected(phasepoints: List[System], interfaces: List[float], m_idx: int
     
     # Check if any of these points cross back over the condition interface
     return np.any(lr*ops_elig <= lr*cond_intf)
-
-    
-def paste_paths(
-    path_back: Path,
-    path_forw: Path,
-    overlap: bool = True,
-    maxlen: Optional[int] = None,
-) -> Path:
-    """Merge a backward with a forward path into a new path.
-
-    The resulting path is equal to the two paths stacked, in correct
-    time. Note that the ordering is important here so that:
-    ``paste_paths(path1, path2) != paste_paths(path2, path1)``.
-
-    There are two things we need to take care of here:
-
-    - `path_back` must be iterated in reverse (it is assumed to be a
-      backward trajectory).
-    - we may have to remove one point in `path_forw` (if the paths overlap).
-
-    Args:
-        path_back: The backward trajectory.
-        path_forw: The forward trajectory.
-        overlap: If True, `path_back` and `path_forw` have a common
-            starting-point; the first point in `path_forw` is
-            identical to the first point in `path_back`. In time-space, this
-            means that the *first* point in `path_forw` is identical to the
-            *last* point in `path_back` (the backward and forward path
-            started at the same location in space).
-        maxlen: This is the maximum length for the new path.
-            If it's not given, it will just be set to the largest of
-            the `maxlen` of the two given paths.
-
-    Returns:
-        The resulting path from the merge.
-
-    Note:
-        Some information about the path will not be set here. This must be
-        set elsewhere. This includes how the path was generated
-        (`path.generated`) and the status of the path (`path.status`).
-    """
-    if maxlen is None:
-        if path_back.maxlen == path_forw.maxlen:
-            maxlen = path_back.maxlen
-        else:
-            # They are unequal and both is not None, just pick the largest.
-            # In case one is None, the other will be picked.
-            # Note that now there is a chance of truncating the path while
-            # pasting!
-            maxlen = max(path_back.maxlen, path_forw.maxlen)
-            msg = f"Unequal length: Using {maxlen} for the new path!"
-            logger.warning(msg)
-    time_origin = path_back.time_origin - path_back.length + 1
-    new_path = path_back.empty_path(maxlen=maxlen, time_origin=time_origin)
-    for phasepoint in reversed(path_back.phasepoints):
-        app = new_path.append(phasepoint)
-        if not app:
-            msg = "Truncated while pasting backwards at: {}"
-            msg = msg.format(new_path.length)
-            logger.warning(msg)
-            return new_path
-    first = True
-    for phasepoint in path_forw.phasepoints:
-        if first and overlap:
-            first = False
-            continue
-        app = new_path.append(phasepoint)
-        if not app:
-            msg = f"Truncated path at: {new_path.length}"
-            logger.warning(msg)
-            return new_path
-    return new_path
-
 
 def load_path(pdir: str) -> Path:
     """Load a path from the given directory."""

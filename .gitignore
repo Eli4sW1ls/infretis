@@ -184,3 +184,4 @@ examples/
 # amsworker
 **/amsworker*/
 
+.vscode/
