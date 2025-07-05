@@ -484,7 +484,12 @@ def load_paths_from_disk(config: Dict[str, Any]) -> List[Path]:
     load_dir = config["simulation"]["load_dir"]
     paths = []
     for pnumber in config["current"]["active"]:
-        new_path = load_path(os.path.join(load_dir, str(pnumber)))
+        if config["simulation"]["mode"] == "staple":
+            # Lazy import to avoid circular dependency
+            from infretis.classes.staple_path import load_staple_path
+            new_path = load_staple_path(os.path.join(load_dir, str(pnumber)))
+        else:
+            new_path = load_path(os.path.join(load_dir, str(pnumber)))
         status = "re" if "restarted_from" in config["current"] else "ld"
         ### TODO: important for shooting move if 'ld' is set. need a smart way
         ### to remember if status is 'sh' or 'wf' etc. maybe in the toml file.

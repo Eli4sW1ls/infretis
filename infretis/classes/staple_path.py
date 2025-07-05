@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Union
 import numpy as np
 from numpy.typing import ArrayLike
 
-from infretis.classes.path import Path, DEFAULT_MAXLEN
+from infretis.classes.path import Path, DEFAULT_MAXLEN, _load_energies_for_path
 from infretis.classes.formatter import (
     EnergyPathFile,
     OrderPathFile,
@@ -29,11 +29,11 @@ logger.addHandler(logging.NullHandler())
 class StaplePath(Path):
     """Path class that supports turns and restricted shooting point selection."""
     
-    def __init__(self, maxlen: int = DEFAULT_MAXLEN, time_origin: int = 0):
+    def __init__(self, maxlen: int = DEFAULT_MAXLEN, time_origin: int = 0, ptype: str = ""):
         """Initialize a turn path."""
         super().__init__(maxlen, time_origin)
         self.sh_region: Tuple[int] = None  # Indices where turns occur
-        self.meta: Dict[str, Any] = {"pptype": str, "dir": 0, }
+        self.ptype = ptype 
 
     def check_start_turn(self, interfaces: List[float]) -> Tuple[bool, int, int]:
         """Check if the start of the path forms a valid turn.
@@ -259,26 +259,26 @@ class StaplePath(Path):
         
         return start_turn_info, end_turn_info, valid
     
-    def get_shooting_point(self, rgen: Generator) -> Tuple[System, int]:
+    def get_shooting_point(self, rgen: Generator) -> Tuple[System, int, Tuple[int, int]]:
         """Pick a random shooting point from the path."""
         ### TODO: probably need an unittest for this to check if correct.
         ### idx = rgen.random_integers(1, self.length - 2)
         if self.sh_region is None:
             logger.warning("No shooting region defined, cannot select a shooting point.")
-            raise ValueError("Shooting region is not defined.")
+            raise ValueError(f"Shooting region is not defined. {self}, {[php.order[0] for php in self.phasepoints]}")
         idx = rgen.integers(self.sh_region[0], self.sh_region[1], endpoint=True)
         order = self.phasepoints[idx].order[0]
         logger.debug(f"Selected point with orderp {order}")
         return self.phasepoints[idx], idx
 
-    def get_pp_path(self, ens: Dict) -> Path:
+    def get_pp_path(self, intfs: List[float], pp_intfs: List[float, float, float]) -> Tuple[Path, str]:
         """Return the (RE)PPTIS part of the staple path."""
-        new_path = self.empty_path(maxlen=self.maxlen)
-        interfaces = ens["all_intfs"]
-        pp_intfs = ens["interfaces"]
-        if len(pp_intfs) != 3:
+        new_path = Path(self.empty_path(maxlen=self.maxlen))
+        assert str(list(set(pp_intfs)))[1:-1] in str(intfs)[1:-1], f"Invalid interface indices: {intfs, pp_intfs, str(list(set(pp_intfs)))[1:-1], str(intfs)[1:-1]}"
+        interfaces = np.array(intfs)  
+        if len(pp_intfs) <= 1:
             logger.warning(
-                "Path does not have 3 interfaces, cannot extract (RE)PPTIS part."
+                "Path does not have 2 interfaces, cannot extract (RE)PPTIS part."
             )
             return None
         
@@ -298,37 +298,64 @@ class StaplePath(Path):
             new_path.path_number = self.path_number
             new_path.weights = self.weights
 
+            if len(intfs) <= 3:
+                if self.phasepoints[0].order[0] < pp_intfs[0]:
+                    if self.phasepoints[-1].order[0] < pp_intfs[0]:
+                        pptype = "LML"
+                    else:
+                        pptype = "LMR"
+                elif self.phasepoints[0].order[0] > pp_intfs[2]:
+                    if self.phasepoints[-1].order[0] > pp_intfs[2]:
+                        pptype = "RMR"
+                    else:
+                        pptype = "RML"
+                for phasep in self.phasepoints:
+                    new_path.append(phasep.copy())
+                return new_path, pptype
             if pp_intfs[1] < self.phasepoints[end_info[2]].order[0] < pp_intfs[2]:   # LML end
                 left_border = next(end_info[2] - p for p in range(end_info[2] + 1) if self.phasepoints[end_info[2] - p].order[0] <= pp_intfs[0]) + 1
                 right_border = next(end_info[2] + p for p in range(end_info[2] - start_info[2] + 1) if self.phasepoints[end_info[2] + p].order[0] <= pp_intfs[0]) - 1
                 assert right_border == self.length - 2, f"Right border {right_border} does not match expected length {self.length - 2}."
+                pptype = "LML"
             elif pp_intfs[1] < self.phasepoints[start_info[2]].order[0] < pp_intfs[2]:   # LML start
                 left_border = next(start_info[2] - p for p in range(start_info[2] + 1) if self.phasepoints[start_info[2] - p].order[0] <= pp_intfs[0]) + 1
                 right_border = next(start_info[2] + p for p in range(end_info[2] - start_info[2] + 1) if self.phasepoints[start_info[2] + p].order[0] <= pp_intfs[0]) - 1
                 assert left_border == 1, f"Left border {left_border} does not match expected 1."
+                pptype = "LML"
             elif pp_intfs[0] < self.phasepoints[start_info[2]].order[0] < pp_intfs[1]:  # RMR start
                 left_border = next(start_info[2] - p for p in range(start_info[2] + 1) if self.phasepoints[start_info[2] - p].order[0] >= pp_intfs[2]) + 1
                 right_border = next(start_info[2] + p for p in range(end_info[2] - start_info[2] + 1) if pp_intfs[0] <= self.phasepoints[start_info[2] + p].order[0] >= pp_intfs[2]) - 1
                 assert left_border == 1, f"Left border {left_border} does not match expected 1."
+                pptype = "RMR"
             elif pp_intfs[0] < self.phasepoints[end_info[2]].order[0] < pp_intfs[1]:  # RMR end
                 left_border = next(end_info[2] - p for p in range(end_info[2] + 1) if self.phasepoints[end_info[2] - p].order[0] >= pp_intfs[2]) + 1
                 right_border = next(end_info[2] + p for p in range(end_info[2] - start_info[2] + 1) if pp_intfs[0] <= self.phasepoints[end_info[2] + p].order[0] >= pp_intfs[2]) - 1
                 assert right_border == self.length - 2, f"Right border {right_border} does not match expected length {self.length - 2}."
+                pptype = "RMR"
             else:
                 left_border = next(start_info[2] + p for p in range(end_info[2] - start_info[2] + 1) if pp_intfs[0] < self.phasepoints[start_info[2] + p].order[0] < pp_intfs[2])
+                print(f"left_border: {left_border}, end_info: {end_info}, start_info: {start_info}, pp_intfs: {pp_intfs}, {[php.order[0] for php in self.phasepoints]}")
                 right_border = next(p for p in range(end_info[2] - left_border + 1) if pp_intfs[2] <= self.phasepoints[left_border + p].order[0] <= pp_intfs[0])            
+                pptype = "LMR" if start_info[1] < end_info[1] else "RML"
         else:
             left_border, right_border = self.sh_region
+            if np.count_nonzero(self.phasepoints[left_border].order[0] < interfaces) > np.count_nonzero(self.phasepoints[right_border].order[0] < interfaces):
+                pptype = "LMR"
+            elif np.count_nonzero(self.phasepoints[left_border].order[0] < interfaces) < np.count_nonzero(self.phasepoints[right_border].order[0] < interfaces):
+                pptype = "RML"
+            else:
+                pptype = "LML" if self.phasepoints[left_border].order[0] < pp_intfs[1] else "RMR"
 
         valid_pp = next((True for p in range(1, right_border - left_border + 1) if np.sign(self.phasepoints[left_border + p].order[0] - pp_intfs[1]) != np.sign(self.phasepoints[left_border + p - 1].order[0] - pp_intfs[1])), False)
         if not valid_pp:
             logger.warning(
                 "Path does not have valid (RE)PPTIS part, cannot extract it."
             )
-            return None
+            return None, ""
         for phasep in self.phasepoints[left_border-1:right_border+2]:
             new_path.append(phasep.copy())
-        return new_path
+
+        return new_path, pptype, (left_border, right_border)
 
     # def get_shooting_point(self, ens: Dict, rgen: Generator,
     #                        ) -> Tuple[System, int]:
@@ -354,7 +381,7 @@ class StaplePath(Path):
         new_path.path_number = self.path_number
         new_path.weights = self.weights
         new_path.sh_region = self.sh_region
-        new_path.meta = self.meta
+        new_path.ptype = self.ptype
         return new_path
     
     def empty_path(self, maxlen=DEFAULT_MAXLEN, **kwargs) -> StaplePath:
@@ -390,7 +417,7 @@ class StaplePath(Path):
                 "ordermin",
                 "path_number",
                 "sh_region",
-                "meta",
+                "ptype",
             ):
                 attr_self = hasattr(self, key)
                 attr_other = hasattr(other, key)
@@ -458,7 +485,7 @@ def turn_detected(phasepoints: List[System] | ArrayLike[System], interfaces: Lis
     # Check if any of these points cross back over the condition interface
     return np.any(lr*ops_elig <= lr*cond_intf)
 
-def load_path(pdir: str) -> Path:
+def load_staple_path(pdir: str) -> StaplePath:
     """Load a path from the given directory."""
     trajtxt = os.path.join(pdir, "traj.txt")
     ordertxt = os.path.join(pdir, "order.txt")
@@ -486,7 +513,7 @@ def load_path(pdir: str) -> Path:
     with OrderPathFile(ordertxt, "r") as orderfile:
         orderdata = next(orderfile.load())["data"][:, 1:]
 
-    path = Path()
+    path = StaplePath()
     for snapshot, order in zip(traj["data"], orderdata):
         frame = System()
         frame.order = order
@@ -494,40 +521,5 @@ def load_path(pdir: str) -> Path:
         frame.vel_rev = snapshot[3]
         path.phasepoints.append(frame)
     _load_energies_for_path(path, pdir)
-    # TODO: CHECK PATH SOMEWHERE .acc, sta = _check_path(path, path_ensemble)
+
     return path
-
-
-def _load_energies_for_path(path: Path, dirname: str) -> None:
-    """Load energy data for a path.
-
-    Args:
-        path: The path we are to set up/fill.
-        dirname: The path to the directory with the input files.
-    """
-    energy_file_name = os.path.join(dirname, "energy.txt")
-    try:
-        with EnergyPathFile(energy_file_name, "r") as energyfile:
-            energy = next(energyfile.load())
-            path.update_energies(
-                energy["data"]["ekin"], energy["data"]["vpot"]
-            )
-    except FileNotFoundError:
-        pass
-
-
-def load_paths_from_disk(config: Dict[str, Any]) -> List[Path]:
-    """Load paths from disk."""
-    load_dir = config["simulation"]["load_dir"]
-    paths = []
-    for pnumber in config["current"]["active"]:
-        new_path = load_path(os.path.join(load_dir, str(pnumber)))
-        status = "re" if "restarted_from" in config["current"] else "ld"
-        ### TODO: important for shooting move if 'ld' is set. need a smart way
-        ### to remember if status is 'sh' or 'wf' etc. maybe in the toml file.
-        new_path.generated = (status, float("nan"), 0, 0)
-        new_path.maxlen = config["simulation"]["tis_set"]["maxlength"]
-        paths.append(new_path)
-        # assign pnumber
-        paths[-1].path_number = pnumber
-    return paths

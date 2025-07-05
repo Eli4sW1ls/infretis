@@ -1733,7 +1733,7 @@ def staple_sh(
 
     """
     if int(ens_set["ens_name"]) == 0:
-        raise NotImplementedError("Staple paths in [0-] is not implemented.")
+        return shoot(ens_set, path, engine, shooting_point, start_cond)
     
     intfs_pp = ens_set["interfaces"]
     # the trial path we will generate
@@ -1746,7 +1746,7 @@ def staple_sh(
             )
         except ValueError as e:
             logger.error("Error preparing shooting point: %s", e)
-            ppath = path.get_pp_path(ens_set)
+            ppath, _, _ = path.get_pp_path((ens_set["all_intfs"], intfs_pp))
             shooting_point, idx, dek = prepare_shooting_point(
                 ppath, ens_set["rgen"], engine, ens_set
             )
@@ -1882,8 +1882,6 @@ def staple_sh(
     )
     trial_path.status = "ACC"
 
-    
-
     return True, trial_path, trial_path.status
 
 def staple_wf(
@@ -2010,7 +2008,7 @@ def staple_extender(
         prop_point = source_seg.phasepoints[prop_idx].copy()  # Get the endpoint phasepoint
 
         turn_seg = source_seg.empty_path(
-            maxlen=ens_set["tis_set"]["maxlength"]
+            maxlen=ens_set["tis_set"]["maxlength"], ptype="ext"
         )
         if rev:
             turn_seg.append(source_seg.phasepoints[1].copy())
@@ -2021,7 +2019,7 @@ def staple_extender(
 
         logger.debug(f"[{partial_path_type}] Propagating backwards until turn.")
         turn_seg.time_origin = source_seg.time_origin
-        success_turn, _ = engine.propagate_st(
+        success_turn, _ = engine.propagate(
             turn_seg, ens_set, prop_point, reverse=rev)
         
         if not success_turn:
@@ -2055,7 +2053,7 @@ def staple_extender(
     
     else:
         bw_turn = source_seg.empty_path(
-            maxlen=ens_set["tis_set"]["maxlength"]
+            maxlen=ens_set["tis_set"]["maxlength"], ptype="ext"
         )
         logger.debug(f"[{partial_path_type}] Propagating backwards until turn.")
         bw_turn.time_origin = source_seg.time_origin
@@ -2081,7 +2079,7 @@ def staple_extender(
         )
 
         fw_turn = source_seg.empty_path(
-            maxlen=ens_set["tis_set"]["maxlength"]
+            maxlen=ens_set["tis_set"]["maxlength"], ptype="ext"
         )
         logger.debug(f"[{partial_path_type}] Propagating forwards until turn.")
         fw_turn.time_origin = source_seg.time_origin

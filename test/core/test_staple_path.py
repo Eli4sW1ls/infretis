@@ -171,7 +171,7 @@ class TestStaplePath:
             "interfaces": [0.25, 0.35, 0.45]  # 3 adjacent interfaces
         }
         
-        pp_path = path.get_pp_path(ens)
+        pp_path, _, _ = path.get_pp_path(ens["all_intfs"], ens["interfaces"])
         
         # PP path should be shorter than original staple path
         assert pp_path.length <= path.length

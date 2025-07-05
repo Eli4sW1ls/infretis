@@ -15,11 +15,11 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Union
 import numpy as np
 
 from infretis.classes.formatter import FileIO, OutputFormatter
+from infretis.classes.staple_path import StaplePath, turn_detected
 
 if TYPE_CHECKING:  # pragma: no cover
     from infretis.classes.orderparameter import OrderParameter
     from infretis.classes.path import Path as InfPath
-    from infretis.classes.staple_path import StaplePath, turn_detected
     from infretis.classes.system import System
 
 
@@ -101,7 +101,7 @@ class EngineBase(metaclass=ABCMeta):
                 status = "Could not add for unknown reason"
             success = False
             stop = True
-        if isinstance(path, StaplePath) and interfaces:
+        if isinstance(path, StaplePath) and path.ptype == "ext":
             op_loc = path.phasepoints[1].order[0]
             m_idx = np.argwhere(left < np.array(interfaces) < right)[0]
             if path.phasepoints[-1].order[0] < interfaces[0]:

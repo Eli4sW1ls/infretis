@@ -26,7 +26,7 @@ class TOMLConfigError(Exception):
     #    super().__init__(message)
 
 
-def setup_internal(config: dict) -> Tuple[dict, REPEX_state | REPEX_state_pp]:
+def setup_internal(config: dict) -> Tuple[dict, REPEX_state | REPEX_state_pp | REPEX_state_staple]:
     """Run the various setup functions.
 
     Args

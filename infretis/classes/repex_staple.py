@@ -14,6 +14,7 @@ from infretis.classes.engines.factory import assign_engines
 from infretis.classes.formatter import PathStorage
 from infretis.core.core import make_dirs
 from infretis.core.tis import calc_cv_vector
+from infretis.classes.staple_path import StaplePath
 
 logger = logging.getLogger("main")  # pylint: disable=invalid-name
 logger.addHandler(logging.NullHandler())
@@ -189,17 +190,37 @@ class REPEX_state_staple(REPEX_state):
                     ),
                 }
                 out_traj = self.pstore.output(self.cstep, data)
-                self.traj_data[traj_num] = {
-                    "frac": np.zeros(self.n, dtype="longdouble"),
-                    "max_op": out_traj.ordermax,
-                    "min_op": out_traj.ordermin,
-                    "length": out_traj.length,
-                    "weights": out_traj.weights,
-                    "adress": out_traj.adress,
-                    "ens_save_idx": ens_save_idx,
-                    "ptype": get_ptype(out_traj,
-                                       *self.ensembles[ens_num + 1]['interfaces'])
-                }
+                if ens_num <= -1:
+                    self.traj_data[traj_num] = {
+                        "frac": np.zeros(self.n, dtype="longdouble"),
+                        "max_op": out_traj.ordermax,
+                        "min_op": out_traj.ordermin,
+                        "length": out_traj.length,
+                        "weights": out_traj.weights,
+                        "adress": out_traj.adress,
+                        "ens_save_idx": ens_save_idx,
+                        "ptype": get_ptype(out_traj,
+                                        *self.ensembles[ens_num + 1]['interfaces'])
+                    }
+                else:
+                    st, end, valid = out_traj.check_turns(self.interfaces)
+                    if not valid:
+                        logger.warning(
+                            "Path does not have valid turns, cannot load staple path."
+                        )
+                        raise ValueError("Path does not have valid turns.")
+                    _, pptype, sh_region = out_traj.get_pp_path(self.interfaces, self.ensembles[ens_num + 1]['interfaces'])
+                    self.traj_data[traj_num] = {
+                        "ens_save_idx": ens_save_idx,
+                        "max_op": out_traj.ordermax,
+                        "min_op": out_traj.ordermin,
+                        "length": out_traj.length,
+                        "adress": out_traj.adress,
+                        "weights": out_traj.weights,
+                        "frac": np.zeros(self.n, dtype="longdouble"),
+                        "ptype": str(st[1]) + pptype + str(end[1]),
+                        "sh_region": sh_region
+                    }
                 traj_num += 1
                 if (
                     self.config["output"].get("delete_old", False)
@@ -255,17 +276,41 @@ class REPEX_state_staple(REPEX_state):
 
         return md_items
 
+    def pattern_header(self):
+        """Write pattern0 header."""
+        if self.toinitiate == 0:
+            restarted = self.config["current"].get("restarted_from")
+            writemode = "a" if restarted else "w"
+            with open(self.pattern_file, writemode) as fp:
+                fp.write(
+                    "# Worker\tMD_start [s]\t\twMD_start [s]\twMD_end",
+                    +"[s]\tMD_end [s]\t Dask_end [s]",
+                    +f"\tEnsembles\t{self.start_time}\n",
+                )
+
+
     def load_paths(self, paths):
         """Load paths."""
         size = self.n - 1
+        interfaces = self.config["simulation"]["interfaces"]
         # we add all the i+ paths.
         for i in range(size - 1):
+            st, end, valid = paths[i+1].check_turns(interfaces)
+            if not valid:
+                logger.warning("Path does not have valid turns, cannot load staple path.")
+                raise ValueError("Path does not have valid turns.")
+            if size <= 3:
+                pptype = get_ptype(paths[i+1], *self.ensembles[i]['interfaces'])
+                sh_region = (1, len(paths[i+1].phasepoints)-1)
+            else:
+                _, pptype, sh_region = paths[i+1].get_pp_path(interfaces, [interfaces[max(i-2, 0)], interfaces[i-1], interfaces[i+1]])
             paths[i + 1].weights = calc_cv_vector(
                 paths[i + 1],
-                self.config["simulation"]["interfaces"],
+                interfaces,
                 self.mc_moves,
                 cap=self.cap,
             )
+            paths[i+1].sh_region = sh_region
             self.add_traj(
                 ens=i,
                 traj=paths[i + 1],
@@ -284,8 +329,8 @@ class REPEX_state_staple(REPEX_state):
                 "adress": paths[i + 1].adress,
                 "weights": paths[i + 1].weights,
                 "frac": np.array(frac, dtype="longdouble"),
-                "ptype": get_ptype(paths[i + 1],
-                                   *self.ensembles[i + 1]['interfaces'])
+                "ptype": str(st[1]) + pptype + str(end[1]),
+                "sh_region": sh_region
             }
         # add minus path:
         paths[0].weights = (1.0,)
@@ -307,18 +352,6 @@ class REPEX_state_staple(REPEX_state):
             "ptype": get_ptype(paths[0],
                                *self.ensembles[0]['interfaces'])
         }
-
-    def pattern_header(self):
-        """Write pattern0 header."""
-        if self.toinitiate == 0:
-            restarted = self.config["current"].get("restarted_from")
-            writemode = "a" if restarted else "w"
-            with open(self.pattern_file, writemode) as fp:
-                fp.write(
-                    "# Worker\tMD_start [s]\t\twMD_start [s]\twMD_end",
-                    +"[s]\tMD_end [s]\t Dask_end [s]",
-                    +f"\tEnsembles\t{self.start_time}\n",
-                )
 
     def initiate_ensembles(self):
         """Create all the ensemble dicts from the *toml config dict."""
