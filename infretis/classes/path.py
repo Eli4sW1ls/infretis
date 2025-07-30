@@ -408,10 +408,8 @@ def paste_paths(
             msg = msg.format(new_path.length)
             logger.warning(msg)
             return new_path
-    first = True
     for i, phasepoint in enumerate(path_forw.phasepoints, start=1):
-        if first and i == overlap:
-            first = False
+        if i <= overlap:
             continue
         app = new_path.append(phasepoint)
         if not app:
@@ -483,11 +481,12 @@ def load_paths_from_disk(config: Dict[str, Any]) -> List[Path]:
     """Load paths from disk."""
     load_dir = config["simulation"]["load_dir"]
     paths = []
+    print("config:", config)
     for pnumber in config["current"]["active"]:
         if config["simulation"]["mode"] == "staple":
             # Lazy import to avoid circular dependency
             from infretis.classes.staple_path import load_staple_path
-            new_path = load_staple_path(os.path.join(load_dir, str(pnumber)))
+            new_path = load_staple_path(os.path.join(load_dir, str(pnumber)), config["simulation"]["interfaces"][0])
         else:
             new_path = load_path(os.path.join(load_dir, str(pnumber)))
         status = "re" if "restarted_from" in config["current"] else "ld"

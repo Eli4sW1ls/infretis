@@ -14,7 +14,6 @@ from infretis.classes.engines.factory import assign_engines
 from infretis.classes.formatter import PathStorage
 from infretis.core.core import make_dirs
 from infretis.core.tis import calc_cv_vector
-from infretis.classes.staple_path import StaplePath
 
 logger = logging.getLogger("main")  # pylint: disable=invalid-name
 logger.addHandler(logging.NullHandler())
@@ -209,7 +208,12 @@ class REPEX_state_staple(REPEX_state):
                             "Path does not have valid turns, cannot load staple path."
                         )
                         raise ValueError("Path does not have valid turns.")
-                    _, pptype, sh_region = out_traj.get_pp_path(self.interfaces, self.ensembles[ens_num + 1]['interfaces'])
+                    if out_traj.sh_region is None or out_traj.ptype is None:
+                        _, pptype, sh_region = out_traj.get_pp_path(self.interfaces, self.ensembles[ens_num + 1]['interfaces'])
+                    else:
+                        print("read st properties from traj")
+                        pptype = out_traj.ptype
+                        sh_region = out_traj.sh_region
                     self.traj_data[traj_num] = {
                         "ens_save_idx": ens_save_idx,
                         "max_op": out_traj.ordermax,
@@ -218,7 +222,7 @@ class REPEX_state_staple(REPEX_state):
                         "adress": out_traj.adress,
                         "weights": out_traj.weights,
                         "frac": np.zeros(self.n, dtype="longdouble"),
-                        "ptype": str(st[1]) + pptype + str(end[1]),
+                        "ptype": str(st[1]) + pptype[:3] + str(end[1]),
                         "sh_region": sh_region
                     }
                 traj_num += 1
@@ -350,7 +354,8 @@ class REPEX_state_staple(REPEX_state):
             "adress": paths[0].adress,
             "frac": np.array(frac, dtype="longdouble"),
             "ptype": get_ptype(paths[0],
-                               *self.ensembles[0]['interfaces'])
+                               *self.ensembles[0]['interfaces']),
+            "sh_region": (1, len(paths[0].phasepoints) - 1)
         }
 
     def initiate_ensembles(self):

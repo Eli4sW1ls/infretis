@@ -181,6 +181,9 @@ def setup_config(
     quantis = config["simulation"]["tis_set"].get("quantis", False)
     config["simulation"]["tis_set"]["quantis"] = quantis
 
+    staple = config["simulation"]["tis_set"].get("staple", False)
+    config["simulation"]["tis_set"]["staple"] = staple
+
     l_1 = config["simulation"]["tis_set"].get("lambda_minus_one", False)
     config["simulation"]["tis_set"]["lambda_minus_one"] = l_1
 

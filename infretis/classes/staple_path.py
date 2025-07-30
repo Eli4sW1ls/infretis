@@ -265,7 +265,7 @@ class StaplePath(Path):
         ### idx = rgen.random_integers(1, self.length - 2)
         if self.sh_region is None:
             logger.warning("No shooting region defined, cannot select a shooting point.")
-            raise ValueError(f"Shooting region is not defined. {self}, {[php.order[0] for php in self.phasepoints]}")
+            raise ValueError(f"Shooting region is not defined. Orders: {[php.order[0] for php in self.phasepoints[:10]] + [0,0,0] + [php.order[0] for php in self.phasepoints[-10:]]}")
         idx = rgen.integers(self.sh_region[0], self.sh_region[1], endpoint=True)
         order = self.phasepoints[idx].order[0]
         logger.debug(f"Selected point with orderp {order}")
@@ -273,7 +273,7 @@ class StaplePath(Path):
 
     def get_pp_path(self, intfs: List[float], pp_intfs: List[float, float, float]) -> Tuple[Path, str]:
         """Return the (RE)PPTIS part of the staple path."""
-        new_path = Path(self.empty_path(maxlen=self.maxlen))
+        new_path = Path(maxlen=self.maxlen, time_origin=self.time_origin)
         assert str(list(set(pp_intfs)))[1:-1] in str(intfs)[1:-1], f"Invalid interface indices: {intfs, pp_intfs, str(list(set(pp_intfs)))[1:-1], str(intfs)[1:-1]}"
         interfaces = np.array(intfs)  
         if len(pp_intfs) <= 1:
@@ -311,7 +311,7 @@ class StaplePath(Path):
                         pptype = "RML"
                 for phasep in self.phasepoints:
                     new_path.append(phasep.copy())
-                return new_path, pptype
+                return new_path, pptype, (1, len(self.phasepoints) - 2)
             if pp_intfs[1] < self.phasepoints[end_info[2]].order[0] < pp_intfs[2]:   # LML end
                 left_border = next(end_info[2] - p for p in range(end_info[2] + 1) if self.phasepoints[end_info[2] - p].order[0] <= pp_intfs[0]) + 1
                 right_border = next(end_info[2] + p for p in range(end_info[2] - start_info[2] + 1) if self.phasepoints[end_info[2] + p].order[0] <= pp_intfs[0]) - 1
@@ -351,7 +351,7 @@ class StaplePath(Path):
             logger.warning(
                 "Path does not have valid (RE)PPTIS part, cannot extract it."
             )
-            return None, ""
+            return None, "", (0,0)
         for phasep in self.phasepoints[left_border-1:right_border+2]:
             new_path.append(phasep.copy())
 
@@ -485,7 +485,7 @@ def turn_detected(phasepoints: List[System] | ArrayLike[System], interfaces: Lis
     # Check if any of these points cross back over the condition interface
     return np.any(lr*ops_elig <= lr*cond_intf)
 
-def load_staple_path(pdir: str) -> StaplePath:
+def load_staple_path(pdir: str, lamb_A: float) -> StaplePath:
     """Load a path from the given directory."""
     trajtxt = os.path.join(pdir, "traj.txt")
     ordertxt = os.path.join(pdir, "order.txt")
@@ -513,7 +513,11 @@ def load_staple_path(pdir: str) -> StaplePath:
     with OrderPathFile(ordertxt, "r") as orderfile:
         orderdata = next(orderfile.load())["data"][:, 1:]
 
-    path = StaplePath()
+    if orderdata[0] > lamb_A and orderdata[1] < lamb_A and orderdata[-2] < lamb_A: # [0-]
+        print("0-?: ", orderdata)
+        path = Path()
+    else:
+        path = StaplePath()
     for snapshot, order in zip(traj["data"], orderdata):
         frame = System()
         frame.order = order

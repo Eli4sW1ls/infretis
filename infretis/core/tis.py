@@ -11,7 +11,7 @@ import numpy as np
 
 from infretis.classes.engines.factory import create_engines
 from infretis.classes.orderparameter import create_orderparameters
-from infretis.classes.path import paste_paths
+from infretis.classes.path import Path, paste_paths
 
 logger = logging.getLogger(__name__)  # pylint: disable=invalid-name
 logger.addHandler(logging.NullHandler())
@@ -323,6 +323,8 @@ def select_shoot(
         if -1 in picked.keys():
             if picked[-1]["ens"]["tis_set"]["quantis"]:
                 accept, new_paths, status = quantis_swap_zero(picked, engines)
+            elif picked[-1]["ens"]["tis_set"]["staple"]:
+                accept, new_paths, status = staple_swap_zero(picked, engines)
             else:
                 accept, new_paths, status = retis_swap_zero(picked, engines)
         else:
@@ -771,7 +773,10 @@ def prepare_shooting_point(
             - The change in kinetic energy when modifying the velocities.
 
     """
-    shooting_point, idx = path.get_shooting_point(rgen)
+    if int(ens_set["ens_name"]) == 0:
+        shooting_point, idx = path.get_shooting_point(rgen)
+    else:
+        shooting_point, idx = path.get_shooting_point(rgen)
     orderp = shooting_point.order
     shpt_copy = shooting_point.copy()
     logger.info("Shooting from order parameter/index: %f, %d", orderp[0], idx)
@@ -1733,7 +1738,10 @@ def staple_sh(
 
     """
     if int(ens_set["ens_name"]) == 0:
-        return shoot(ens_set, path, engine, shooting_point, start_cond)
+        success, trial_path, status = shoot(ens_set, path, engine, shooting_point, start_cond)
+        trial_path.sh_region = (1, trial_path.length - 1)
+        trial_path.ptype = "" #TODO
+        return success, trial_path, status
     
     intfs_pp = ens_set["interfaces"]
     # the trial path we will generate
@@ -1746,7 +1754,7 @@ def staple_sh(
             )
         except ValueError as e:
             logger.error("Error preparing shooting point: %s", e)
-            ppath, _, _ = path.get_pp_path((ens_set["all_intfs"], intfs_pp))
+            ppath, _, _ = path.get_pp_path(ens_set["all_intfs"], intfs_pp)
             shooting_point, idx, dek = prepare_shooting_point(
                 ppath, ens_set["rgen"], engine, ens_set
             )
@@ -1851,7 +1859,7 @@ def staple_sh(
         return False, trial_path, trial_path.status
 
     # Last check - Did we cross the middle interface?
-    if "must_cross_M" in ens_set and ens_set["must_cross_M"]: # not for [0-]
+    if ens_set.get("must_cross_M", False): # not for [0-]
 
         # detect if: minorder < middle interf <= maxorder
         if not pptype[-1][1]:
@@ -1880,7 +1888,10 @@ def staple_sh(
     success, trial_path, _ = staple_extender(
         trial_path, pptype, engine, ens_set
     )
-    trial_path.status = "ACC"
+    trial_path.status = "ACC" if success else "EXT"
+    if not success:
+        logger.debug("Shooting move failed to extend path.")
+        return False, trial_path, trial_path.status
 
     return True, trial_path, trial_path.status
 
@@ -1980,6 +1991,214 @@ def staple_wf(
     trial_path.status = "ACC"
     return True, trial_path, trial_path.status
 
+def staple_swap_zero(
+    picked: Dict[int, Any],
+    engines: Dict[int, List[EngineBase]],
+) -> Tuple[bool, List[InfPath], str]:
+    """Perform the StapleTIS swapping for `[0^-] <-> [0^+]` swaps.
+
+    This function implements the swap move for StapleTIS between the [0^-] and [0^+] ensembles.
+    It generates new trial paths for both ensembles by propagating from endpoints of the partner
+    ensemble's path, and then applies the staple extension to the [0^+] path. The move is accepted
+    if both resulting paths are valid and satisfy the ensemble constraints.
+
+    Args:
+        picked: A dictionary mapping the ensemble indices to their
+            settings, including the move and current path.
+        engines: The engines used to propagate the system.
+
+    Returns:
+        A tuple containing:
+            - True if the move is accepted, False otherwise.
+            - The generated paths for [0^-] and [0^+].
+            - A string representing the status of the move.
+
+    Details:
+        1) For [0^-], the initial point from [0^+] is propagated backward (if allowed),
+           and the second point from [0^+] is appended at the end. The resulting path
+           is assigned the "RMR" partial path type and sh_region.
+        2) For [0^+], the last point from [0^-] is propagated forward (if allowed),
+           and the second last point from [0^-] is prepended. The resulting path is
+           then extended using the staple_extender to complete the staple path.
+        3) If both paths are valid, the move is accepted. If the move type is "st_wf",
+           a high acceptance swap is performed.
+        4) The function returns the acceptance status, the new paths, and the move status.
+
+    Note:
+        This move is specific to StapleTIS and differs from standard RETIS zero swaps
+        by the use of staple extension for the [0^+] path.
+    """
+    ens_set0 = picked[-1]["ens"]
+    ens_set1 = picked[0]["ens"]
+    engine0 = engines[-1][0]
+    engine1 = engines[0][0]
+    path_old0 = picked[-1]["traj"]
+    path_old1 = picked[0]["traj"]
+    maxlen0 = ens_set0["tis_set"]["maxlength"]
+    maxlen1 = ens_set1["tis_set"]["maxlength"]
+
+    ens_moves = [ens_set0["mc_move"], ens_set1["mc_move"]]
+    intf_w = [list(ens_set0["interfaces"]), list(ens_set1["interfaces"])]
+
+    # intf_w = [list(i) for i in (path_ensemble0.interfaces,
+    #                             path_ensemble1.interfaces)]
+    for i, mc_move in enumerate([ens_set0["tis_set"], ens_set1["tis_set"]]):
+        intf_w[i][2] = mc_move.get("interface_cap", intf_w[i][2])
+
+    # for i, j in enumerate([settings['ensemble'][k] for k in (0, 1)]):
+    #     if ens_moves[i] == 'wf':
+    #         intf_w[i][2] = j['tis'].get('interface_cap', intf_w[i][2])
+
+    # 0. check if MD is allowed
+    # allowed = (path_ensemble0.last_path.get_end_point(
+    #             path_ensemble0.interfaces[0],
+    #             path_ensemble0.interfaces[-1]) == 'R')
+    allowed = (
+        path_old0.get_end_point(
+            ens_set0["interfaces"][0], ens_set0["interfaces"][-1]
+        )
+        == "R"
+    )
+    # if allowed:
+    #     swap_ensemble_attributes(ensemble0, ensemble1, settings)
+
+    # if lambda_minus_one, reject early if path_old0
+    if set(ens_set0["start_cond"]) == set(["L", "R"]):
+        if path_old0.check_interfaces(ens_set0["interfaces"])[1] == "L":
+            return False, [path_old0, path_old1], "0-L"
+
+    # 1. Generate path for [0^-] from [0^+]:
+    # We generate from the first point of the path in [0^+]:
+    logger.info("Swapping [0^-] <-> [0^*]")
+    logger.info("Creating path for [0^-]")
+    # system = path_ensemble1.last_path.phasepoints[0].copy()
+    shpt_copy = path_old1.phasepoints[0].copy()
+    # shpt_copy2 = path_old1.phasepoints[0].copy()
+    logger.info("Initial point is: %s", shpt_copy.order)
+    # Propagate it backward in time:
+    path_tmp = path_old0.empty_path(maxlen=maxlen1 - 1)
+    if allowed:
+        logger.info("Propagating for [0^-]")
+        engine0.propagate(path_tmp, ens_set0, shpt_copy, reverse=True)
+    else:
+        logger.info("Not propagating for [0^-]")
+        path_tmp.append(shpt_copy)
+    path0 = path_tmp.empty_path(maxlen=maxlen0)
+    for phasepoint in reversed(path_tmp.phasepoints):
+        path0.append(phasepoint)
+    # print('lobster a', path_tmp.length, path0.length, allowed)
+    # Add second point from [0^+] at the end:
+    logger.info("Adding second point from [0^+]:")
+    # Here we make a copy of the phase point, as we will update
+    # the configuration and append it to the new path:
+    # phase_point = path_ensemble1.last_path.phasepoints[1].copy()
+    phase_point = path_old1.phasepoints[1].copy()
+    logger.info("Point is %s", phase_point.order)
+    engine1.dump_phasepoint(phase_point, "second")
+    path0.append(phase_point)
+    if path0.length == maxlen0:
+        path0.status = "BTX"
+    elif path0.length < 3:
+        path0.status = "BTS"
+    elif (
+        "L" not in set(ens_set0["start_cond"])
+        and "L" in path0.check_interfaces(ens_set0["interfaces"])[:2]
+    ):
+        path0.status = "0-L"
+    else:
+        path0.status = "ACC"
+
+    # 2. Generate path for [0^+] from [0^-]:
+    logger.info("Creating path for [0^+] from [0^-]")
+    # This path will be generated starting from the LAST point of [0^-] which
+    # should be on the right side of the interface. We will also add the
+    # SECOND LAST point from [0^-] which should be on the left side of the
+    # interface, this is added after we have generated the path and we
+    # save space for this point by letting maxlen = maxlen1-1 here:
+    path_tmp = path_old1.empty_path(maxlen=maxlen1 - 1)
+    # We start the generation from the LAST point:
+    # Again, the copy below is not needed as the propagate
+    # method will not alter the initial state.
+    # system = path_ensemble0.last_path.phasepoints[-1].copy()
+    system = path_old0.phasepoints[-1].copy()
+    if allowed:
+        logger.info("Initial point is %s", system.order)
+        # nsembles[1]['system'] = system
+        logger.info("Propagating for [0^+]")
+        engine1.propagate(path_tmp, ens_set1, system, reverse=False)
+        # Ok, now we need to just add the SECOND LAST point from [0^-] as
+        # the first point for the path:
+        path1 = path_tmp.empty_path(maxlen=maxlen1)
+        # phase_point = path_ensemble0.last_path.phasepoints[-2].copy()
+        phase_point = path_old0.phasepoints[-2].copy()
+        logger.info("Add second last point: %s", phase_point.order)
+        engine0.dump_phasepoint(phase_point, "second_last")
+        path1.append(phase_point)
+        path1 += path_tmp  # Add rest of the path.
+
+        pptype = path1.check_interfaces(intf_w[1])
+        # Start extending the path:
+        success, path1, _ = staple_extender(
+            path1, pptype[:3], engine1, ens_set1
+        )
+        path1.status = "ACC" if success else "EXT"
+    else:
+        path1 = path_tmp
+        path1.append(system)
+        logger.info("Skipping propagating for [0^+] from L")
+
+    ##### NB if path_ensemble1.last_path.get_move() != 'ld':
+    ##### NB     path0.set_move('s+')
+    ##### NB else:
+    ##### NB     path0.set_move('ld')
+
+    ##### NB if path_ensemble0.last_path.get_move() != 'ld':
+    ##### NB     path1.set_move('s-')
+    ##### NB else:
+    ##### NB     path1.set_move('ld')
+    if path1.length >= maxlen1:
+        path1.status = "FTX"
+    elif path1.length < 3:
+        path1.status = "FTS"
+    else:
+        path1.status = "ACC"
+    logger.info("Done with swap zero!")
+
+    # Final checks:
+    accept = path0.status == "ACC" and path1.status == "ACC"
+    status = (
+        "ACC"
+        if accept
+        else (path0.status if path0.status != "ACC" else path1.status)
+    )
+    # TODO High Acceptance swap is required when Wire Fencing are used
+    if accept:
+        if "st_wf" in ens_moves:
+            accept, status = high_acc_swap(
+                [path1, path_old1],
+                ens_set0["rgen"],
+                intf_w[0],
+                intf_w[1],
+                ens_moves,
+            )
+
+    for i, path, _, _ in (
+        (0, path0, ens_set0["tis_set"], "s+"),
+        (1, path1, ens_set1["tis_set"], "s-"),
+    ):
+        if not accept and path.status == "ACC":
+            path.status = status
+
+        # These should be 1 unless length of paths equals 3.
+        # This technicality is not yet fixed. (An issue is open as a reminder)
+
+        # ens_set = settings['ensemble'][i]
+        move = ens_moves[i]
+        path.weight = (
+            compute_weight(path, intf_w[i], move) if move in ("wf") else 1
+        )
+    return accept, [path0, path1], status
+
 def staple_extender(
     source_seg: InfPath,
     partial_path_type: Tuple[str, ...],
@@ -2012,10 +2231,8 @@ def staple_extender(
         )
         if rev:
             turn_seg.append(source_seg.phasepoints[1].copy())
-            turn_seg.append(prop_point)
         else:
             turn_seg.append(source_seg.phasepoints[-2].copy())
-            turn_seg.append(prop_point)
 
         logger.debug(f"[{partial_path_type}] Propagating backwards until turn.")
         turn_seg.time_origin = source_seg.time_origin
@@ -2040,9 +2257,10 @@ def staple_extender(
             if full_staple.length >= ens_set["tis_set"]["maxlength"]:
                 full_staple.status = "BTX"
                 success = False
+            full_staple.sh_region = (turn_seg.length - 1, full_staple.length - 1)
         else:
             full_staple = source_seg.copy()
-            for phasepoint in turn_seg.phasepoints:
+            for phasepoint in turn_seg.phasepoints[2:]:
                 app = full_staple.append(phasepoint)
                 if not app:
                     msg = "Truncated while pasting forwards at: {}"
@@ -2050,7 +2268,7 @@ def staple_extender(
                     logger.warning(msg)
                     full_staple.status = "FTX"
                     success = False
-    
+            full_staple.sh_region = (1, source_seg.length - 1)
     else:
         bw_turn = source_seg.empty_path(
             maxlen=ens_set["tis_set"]["maxlength"], ptype="ext"
@@ -2059,7 +2277,6 @@ def staple_extender(
         bw_turn.time_origin = source_seg.time_origin
         prop_point = source_seg.phasepoints[0].copy()
         bw_turn.append(source_seg.phasepoints[1].copy())
-        bw_turn.append(prop_point)
 
         success_turn, _ = engine.propagate(
             bw_turn, ens_set, prop_point, reverse=True)
@@ -2085,7 +2302,6 @@ def staple_extender(
         fw_turn.time_origin = source_seg.time_origin
         prop_point = source_seg.phasepoints[-1].copy()
         fw_turn.append(source_seg.phasepoints[-2].copy())
-        fw_turn.append(prop_point)
 
         success_turn, _ = engine.propagate(
             fw_turn, ens_set, prop_point, reverse=False)
@@ -2105,6 +2321,8 @@ def staple_extender(
                 logger.warning(msg)
                 full_staple.status = "FTX"
                 success = False
+
+        full_staple.sh_region = (bw_turn.length - 1, bw_turn.length + source_seg.length - 3)
         
     # Check if the length of the full staple exceeds the maximum allowed length
     if full_staple.length >= ens_set["tis_set"]["maxlength"]:
