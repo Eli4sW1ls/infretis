@@ -293,7 +293,7 @@ class StaplePath(Path):
             start_info, end_info, valid = self.check_turns(interfaces)
             if not valid:
                 logger.warning("Path does not have valid turns, cannot extract (RE)PPTIS part.")
-                return None
+                return None, "", (0,0)
             new_path.status = self.status
             new_path.generated = self.generated
             new_path.maxlen = self.maxlen
@@ -340,7 +340,7 @@ class StaplePath(Path):
                 pptype = "LML" 
             else:
                 left_border = next(start_info[2] + p for p in range(end_info[2] - start_info[2] + 1) if pp_intfs[0] < self.phasepoints[start_info[2] + p].order[0] < pp_intfs[2])
-                print(f"left_border: {left_border}, end_info: {end_info}, start_info: {start_info}, pp_intfs: {pp_intfs}, {[php.order[0] for php in self.phasepoints[:10] + self.phasepoints[-10:]]}")
+                # print(f"left_border: {left_border}, end_info: {end_info}, start_info: {start_info}, pp_intfs: {pp_intfs}, {[php.order[0] for php in self.phasepoints[:10] + self.phasepoints[-10:]]}")
                 right_border = next(left_border + p for p in range(end_info[2] - left_border + 1) if pp_intfs[2] <= self.phasepoints[left_border + p].order[0] or pp_intfs[0] >= self.phasepoints[left_border + p].order[0])            
                 pptype = "LMR" if start_info[1] < end_info[1] else "RML"
         else:
@@ -352,7 +352,7 @@ class StaplePath(Path):
             else:
                 pptype = "LML" if self.phasepoints[left_border].order[0] < pp_intfs[1] else "RMR"
 
-        valid_pp = next((True for p in range(1, right_border - left_border + 1) if np.sign(self.phasepoints[left_border + p].order[0] - pp_intfs[1]) != np.sign(self.phasepoints[left_border + p - 1].order[0] - pp_intfs[1])), False)
+        valid_pp = next((True for p in range(right_border - left_border + 1) if np.sign(self.phasepoints[left_border + p].order[0] - pp_intfs[1]) != np.sign(self.phasepoints[left_border + p - 1].order[0] - pp_intfs[1])), False)
         if not valid_pp:
             logger.warning(
                 "Path does not have valid (RE)PPTIS part, cannot extract it."

@@ -1737,7 +1737,6 @@ def staple_sh(
             - A string representing the status of the path.
 
     """
-    print("Shooting move for ensemble:", ens_set["ens_name"])
     if int(ens_set["ens_name"]) == 0:
         return shoot(ens_set, path, engine, shooting_point, start_cond)
     
@@ -2153,13 +2152,12 @@ def staple_swap_zero(
         chk_intf = path1.check_interfaces(intf_w[1])
         pptype = str(chk_intf[0] + chk_intf[2] + chk_intf[1])
         # Start extending the path:
-        print("extending path1 with pptype:", pptype, "length:", path1.length, "last order:", path1.phasepoints[-1].order[0], "first order:", path1.phasepoints[0].order[0])
+        # print("extending path1 with pptype:", pptype, "length:", path1.length, "last order:", path1.phasepoints[-1].order[0], "first order:", path1.phasepoints[0].order[0])
         success, path1, _ = staple_extender(
             path1, pptype, engine1, ens_set1
         )
-        print("length after extending:", path1.length)
+        # print("length after extending:", path1.length)
         path1.ptype = pptype
-        path1.sh_region = (1, path_tmp.length - 2)
     else:
         path1 = path_tmp
         path1.append(system)
@@ -2276,6 +2274,7 @@ def staple_extender(
             return False, source_seg, source_seg.status
         # TODO: extra check?
         if rev:
+            # print("Turn segment:", [php.order[0] for php in turn_seg.phasepoints[:2]], [php.order[0] for php in source_seg.phasepoints[:2]])
             full_staple = paste_paths(
                 turn_seg,
                 source_seg,
@@ -2285,9 +2284,11 @@ def staple_extender(
             if full_staple.length >= ens_set["tis_set"]["maxlength"]:
                 full_staple.status = "BTX"
                 success = False
+            # print("length after pasting:", full_staple.length, source_seg.length+turn_seg.length - 2)
             full_staple.sh_region = (turn_seg.length - 1, full_staple.length - 2)
         else:
             full_staple = source_seg.copy()
+            # print("Turn segment:", [php.order[0] for php in turn_seg.phasepoints[:2]], [php.order[0] for php in source_seg.phasepoints[-2:]])
             for phasepoint in turn_seg.phasepoints[2:]:
                 app = full_staple.append(phasepoint)
                 if not app:
@@ -2296,7 +2297,8 @@ def staple_extender(
                     logger.warning(msg)
                     full_staple.status = "FTX"
                     success = False
-            full_staple.sh_region = (1, source_seg.length - 2)
+            # print("length after pasting:", full_staple.length, source_seg.length+turn_seg.length - 2)
+            full_staple.sh_region = (1, full_staple.length - 2)
     else:
         bw_turn = source_seg.empty_path(
             maxlen=ens_set["tis_set"]["maxlength"], ptype="ext"
@@ -2316,12 +2318,14 @@ def staple_extender(
                 source_seg.status = "BTX"
             return False, source_seg, source_seg.status
         
+        # print("BW Turn segment:", [php.order[0] for php in bw_turn.phasepoints[:2]], [php.order[0] for php in source_seg.phasepoints[:2]])
         full_staple = paste_paths(
             bw_turn,
             source_seg,
             overlap=2,
             maxlen=ens_set["tis_set"]["maxlength"],
         )
+        # print("length after BW pasting:", full_staple.length, source_seg.length+bw_turn.length - 2)
 
         fw_turn = source_seg.empty_path(
             maxlen=ens_set["tis_set"]["maxlength"], ptype="ext"
@@ -2341,6 +2345,7 @@ def staple_extender(
                 full_staple.status = "FTX"
             return False, full_staple, full_staple.status
         
+        # print("FW Turn segment:", [php.order[0] for php in fw_turn.phasepoints[:2]], [php.order[0] for php in source_seg.phasepoints[-2:]])
         for phasepoint in fw_turn.phasepoints[2:]:
             app = full_staple.append(phasepoint)
             if not app:
@@ -2349,7 +2354,7 @@ def staple_extender(
                 logger.warning(msg)
                 full_staple.status = "FTX"
                 success = False
-
+        # print("length after FW pasting:", full_staple.length, source_seg.length+bw_turn.length + fw_turn.length - 4)
         full_staple.sh_region = (bw_turn.length - 1, bw_turn.length + source_seg.length - 4)
         
     # Check if the length of the full staple exceeds the maximum allowed length

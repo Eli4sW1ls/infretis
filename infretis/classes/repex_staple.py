@@ -211,7 +211,7 @@ class REPEX_state_staple(REPEX_state):
                     if len(out_traj.sh_region) != 2 or len(out_traj.ptype) < 3:
                         _, pptype, sh_region = out_traj.get_pp_path(self.interfaces, self.ensembles[ens_num + 1]['interfaces'])
                     else:
-                        print(f"read st properties from traj {out_traj.ordermin}-{out_traj.ordermax}, {out_traj.ptype}, {out_traj.sh_region}, {[php.order[0] for php in out_traj.phasepoints[out_traj.sh_region[0]-1:out_traj.sh_region[0]+8] + out_traj.phasepoints[out_traj.sh_region[1]-8:out_traj.sh_region[1]+1]]}") # noqa: E501
+                        # print(f"read st properties from traj {out_traj.path_number}: {out_traj.ordermin}-{out_traj.ordermax}, {out_traj.ptype}, {out_traj.sh_region}, {[php.order[0] for php in out_traj.phasepoints[out_traj.sh_region[0]-1:out_traj.sh_region[0]+8] + out_traj.phasepoints[out_traj.sh_region[1]-8:out_traj.sh_region[1]+2]]}") # noqa: E501
                         pptype = out_traj.ptype
                         sh_region = out_traj.sh_region
                     self.traj_data[traj_num] = {
