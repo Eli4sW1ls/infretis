@@ -101,9 +101,22 @@ class EngineBase(metaclass=ABCMeta):
                 status = "Could not add for unknown reason"
             success = False
             stop = True
+        # print(f"is staple path: {isinstance(path, StaplePath)}, ptype: {path.ptype if isinstance(path, StaplePath) else 'N/A'}")
         if isinstance(path, StaplePath) and path.ptype == "ext":
+            # print(f"staple ext {phase_point.order[0]}, interfaces: {left}, {right}")
+            interfaces_array = np.array(interfaces)
             op_loc = path.phasepoints[1].order[0]
-            m_idx = np.argwhere(left < np.array(interfaces) < right)[0]
+            mask = (left < interfaces_array) & (interfaces_array < right)
+            matches = np.argwhere(mask)
+            if len(matches) > 0:
+                m_idx = matches[0][0]
+            elif left == interfaces[0]:
+                m_idx = 0
+            else:
+                logger.error(f"Could not find middle interface for interval {left}, {right} in interfaces {interfaces}")
+                raise ValueError(
+                    f"Could not find middle interface for interval {left}, {right} in interfaces {interfaces}"
+                )
             if path.phasepoints[-1].order[0] < interfaces[0]:
                 status = "Crossed into A!"
                 success = True
@@ -113,7 +126,7 @@ class EngineBase(metaclass=ABCMeta):
                 success = True
                 stop = True
             # If we are using a StaplePath, we need to check the order:
-            elif turn_detected(path.phasepoints, interfaces, m_idx
+            elif turn_detected(path.phasepoints, interfaces, m_idx,
                                -1 if op_loc < left else (1 if op_loc > right else None)):
                 status = "Order parameter is not monotonic!"
                 success = True
@@ -293,7 +306,7 @@ class EngineBase(metaclass=ABCMeta):
 
         Returns:
             A tuple containing:
-                - True if the enerated path can be accepted. False otherwise.
+                - True if the generated path can be accepted. False otherwise.
                 - A text description of the current status of the propagation.
                   This can be used to interpret the cases where the generated
                   path is not acceptable.

@@ -481,7 +481,6 @@ def load_paths_from_disk(config: Dict[str, Any]) -> List[Path]:
     """Load paths from disk."""
     load_dir = config["simulation"]["load_dir"]
     paths = []
-    print("config:", config)
     for pnumber in config["current"]["active"]:
         if config["simulation"]["mode"] == "staple":
             # Lazy import to avoid circular dependency

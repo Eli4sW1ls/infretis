@@ -142,8 +142,10 @@ class StaplePath(Path):
         end_op = self.phasepoints[-1].order[0]
         
         # Check if already outside interface boundaries - automatically valid turn
-        if end_op <= intfs_min or end_op >= intfs_max:
-            return True, -1, self.length - 1
+        if end_op >= intfs_max:
+            return True, len(interfaces)-1, self.length - 1
+        elif end_op <= intfs_min:
+            return True, 0, self.length - 1
             
         prev_val = self.phasepoints[-2].order[0]
         end_increasing = end_op < prev_val  # Note: direction is relative to backward scan
@@ -274,7 +276,7 @@ class StaplePath(Path):
     def get_pp_path(self, intfs: List[float], pp_intfs: List[float, float, float]) -> Tuple[Path, str]:
         """Return the (RE)PPTIS part of the staple path."""
         new_path = Path(maxlen=self.maxlen, time_origin=self.time_origin)
-        assert str(list(set(pp_intfs)))[1:-1] in str(intfs)[1:-1], f"Invalid interface indices: {intfs, pp_intfs, str(list(set(pp_intfs)))[1:-1], str(intfs)[1:-1]}"
+        assert str(list(dict.fromkeys(pp_intfs)))[1:-1] in str(intfs)[1:-1], f"Invalid interface indices: {intfs, pp_intfs, str(list(dict.fromkeys(pp_intfs)))[1:-1], str(intfs)[1:-1]}"
         interfaces = np.array(intfs)  
         if len(pp_intfs) <= 1:
             logger.warning(
@@ -332,10 +334,14 @@ class StaplePath(Path):
                 right_border = next(end_info[2] + p for p in range(end_info[2] - start_info[2] + 1) if pp_intfs[0] <= self.phasepoints[end_info[2] + p].order[0] >= pp_intfs[2]) - 1
                 assert right_border == self.length - 2, f"Right border {right_border} does not match expected length {self.length - 2}."
                 pptype = "RMR"
+            elif start_info[1] == end_info[1] == 0:
+                left_border = 1
+                right_border = self.length - 2
+                pptype = "LML" 
             else:
                 left_border = next(start_info[2] + p for p in range(end_info[2] - start_info[2] + 1) if pp_intfs[0] < self.phasepoints[start_info[2] + p].order[0] < pp_intfs[2])
-                print(f"left_border: {left_border}, end_info: {end_info}, start_info: {start_info}, pp_intfs: {pp_intfs}, {[php.order[0] for php in self.phasepoints]}")
-                right_border = next(p for p in range(end_info[2] - left_border + 1) if pp_intfs[2] <= self.phasepoints[left_border + p].order[0] <= pp_intfs[0])            
+                print(f"left_border: {left_border}, end_info: {end_info}, start_info: {start_info}, pp_intfs: {pp_intfs}, {[php.order[0] for php in self.phasepoints[:10] + self.phasepoints[-10:]]}")
+                right_border = next(left_border + p for p in range(end_info[2] - left_border + 1) if pp_intfs[2] <= self.phasepoints[left_border + p].order[0] or pp_intfs[0] >= self.phasepoints[left_border + p].order[0])            
                 pptype = "LMR" if start_info[1] < end_info[1] else "RML"
         else:
             left_border, right_border = self.sh_region
@@ -386,8 +392,7 @@ class StaplePath(Path):
     
     def empty_path(self, maxlen=DEFAULT_MAXLEN, **kwargs) -> StaplePath:
         """Return an empty path of same class as the current one."""
-        time_origin = kwargs.get("time_origin", 0)
-        return self.__class__(maxlen=maxlen, time_origin=time_origin)
+        return self.__class__(maxlen=maxlen, **kwargs)
 
     def __eq__(self, other) -> bool:
         """Check if two paths are equal."""

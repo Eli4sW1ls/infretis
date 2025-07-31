@@ -1737,11 +1737,9 @@ def staple_sh(
             - A string representing the status of the path.
 
     """
+    print("Shooting move for ensemble:", ens_set["ens_name"])
     if int(ens_set["ens_name"]) == 0:
-        success, trial_path, status = shoot(ens_set, path, engine, shooting_point, start_cond)
-        trial_path.sh_region = (1, trial_path.length - 1)
-        trial_path.ptype = "" #TODO
-        return success, trial_path, status
+        return shoot(ens_set, path, engine, shooting_point, start_cond)
     
     intfs_pp = ens_set["interfaces"]
     # the trial path we will generate
@@ -1828,10 +1826,10 @@ def staple_sh(
 
     # Also update information about the shooting:
     trial_path.generated = (
-        "sh",
+        "st_sh",
         shooting_point.order[0],
         idx,
-        path_back.length - 1,
+        path_back.length - 1
     )
     if not success_forw:
         trial_path.status = "FTL"
@@ -1846,14 +1844,15 @@ def staple_sh(
         return False, trial_path, trial_path.status
 
     trial_path.weight = 1.0
-    pptype = trial_path.check_interfaces(intfs_pp)
+    intf_chk = trial_path.check_interfaces(intfs_pp)
+    pptype = str(intf_chk[0] + intf_chk[2] + intf_chk[1])
 
     # Deal with the rejections for path properties.
     # Make sure we did not hit the left interface on {0-}
     # Which is the only ensemble that allows paths starting in R
     if (
         "L" not in set(start_cond)
-        and "L" in pptype[:2]
+        and "L" in intf_chk[:2]
     ):
         trial_path.status = "0-L"
         return False, trial_path, trial_path.status
@@ -1862,7 +1861,7 @@ def staple_sh(
     if ens_set.get("must_cross_M", False): # not for [0-]
 
         # detect if: minorder < middle interf <= maxorder
-        if not pptype[-1][1]:
+        if not intf_chk[-1][1]:
             trial_path.status = 'NCR'
             return False, trial_path, trial_path.status
 
@@ -1870,8 +1869,8 @@ def staple_sh(
             # if we do cross middle interface
             # path still has to come from left or right
             # so we need cross[0] or cross[2] to be true
-            if not (pptype[-1][0] or
-                    pptype[-1][2]):
+            if not (intf_chk[-1][0] or
+                    intf_chk[-1][2]):
                 trial_path.status = 'NCR'
                 return False, trial_path, trial_path.status
 
@@ -1879,7 +1878,7 @@ def staple_sh(
     start_cond = ens_set.get("start_cond", start_cond)
     if set(("R", "L")) == set(start_cond):
         pass
-    elif not pptype[-1][1]:
+    elif not intf_chk[-1][1]:
         # No, we did not cross the middle interface:
         trial_path.status = "NCR"
         return False, trial_path, trial_path.status
@@ -1889,6 +1888,15 @@ def staple_sh(
         trial_path, pptype, engine, ens_set
     )
     trial_path.status = "ACC" if success else "EXT"
+    trial_path.ptype = pptype
+    trial_path.generated = (
+        "st_sh",
+        shooting_point.order[0],
+        idx,
+        trial_path.length,
+        pptype,
+        trial_path.sh_region,
+    )
     if not success:
         logger.debug("Shooting move failed to extend path.")
         return False, trial_path, trial_path.status
@@ -2107,6 +2115,12 @@ def staple_swap_zero(
         path0.status = "0-L"
     else:
         path0.status = "ACC"
+        path0.generated = (
+            "st_s+",
+            path_old1.phasepoints[0].order[0],
+            1,
+            path0.length,
+        )
 
     # 2. Generate path for [0^+] from [0^-]:
     logger.info("Creating path for [0^+] from [0^-]")
@@ -2136,12 +2150,16 @@ def staple_swap_zero(
         path1.append(phase_point)
         path1 += path_tmp  # Add rest of the path.
 
-        pptype = path1.check_interfaces(intf_w[1])
+        chk_intf = path1.check_interfaces(intf_w[1])
+        pptype = str(chk_intf[0] + chk_intf[2] + chk_intf[1])
         # Start extending the path:
+        print("extending path1 with pptype:", pptype, "length:", path1.length, "last order:", path1.phasepoints[-1].order[0], "first order:", path1.phasepoints[0].order[0])
         success, path1, _ = staple_extender(
-            path1, pptype[:3], engine1, ens_set1
+            path1, pptype, engine1, ens_set1
         )
-        path1.status = "ACC" if success else "EXT"
+        print("length after extending:", path1.length)
+        path1.ptype = pptype
+        path1.sh_region = (1, path_tmp.length - 2)
     else:
         path1 = path_tmp
         path1.append(system)
@@ -2160,8 +2178,18 @@ def staple_swap_zero(
         path1.status = "FTX"
     elif path1.length < 3:
         path1.status = "FTS"
+    elif not success:
+        path1.status = "EXT"
     else:
         path1.status = "ACC"
+        path1.generated = (
+            "st_s-",
+            path_old0.phasepoints[-2].order[0],
+            path1.length - 1,
+            path1.length,
+            path1.ptype,
+            path1.sh_region,
+        )
     logger.info("Done with swap zero!")
 
     # Final checks:
@@ -2257,7 +2285,7 @@ def staple_extender(
             if full_staple.length >= ens_set["tis_set"]["maxlength"]:
                 full_staple.status = "BTX"
                 success = False
-            full_staple.sh_region = (turn_seg.length - 1, full_staple.length - 1)
+            full_staple.sh_region = (turn_seg.length - 1, full_staple.length - 2)
         else:
             full_staple = source_seg.copy()
             for phasepoint in turn_seg.phasepoints[2:]:
@@ -2268,7 +2296,7 @@ def staple_extender(
                     logger.warning(msg)
                     full_staple.status = "FTX"
                     success = False
-            full_staple.sh_region = (1, source_seg.length - 1)
+            full_staple.sh_region = (1, source_seg.length - 2)
     else:
         bw_turn = source_seg.empty_path(
             maxlen=ens_set["tis_set"]["maxlength"], ptype="ext"
@@ -2322,7 +2350,7 @@ def staple_extender(
                 full_staple.status = "FTX"
                 success = False
 
-        full_staple.sh_region = (bw_turn.length - 1, bw_turn.length + source_seg.length - 3)
+        full_staple.sh_region = (bw_turn.length - 1, bw_turn.length + source_seg.length - 4)
         
     # Check if the length of the full staple exceeds the maximum allowed length
     if full_staple.length >= ens_set["tis_set"]["maxlength"]:
