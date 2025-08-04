@@ -90,6 +90,74 @@ class TestStaplePathPerformance:
         assert isinstance(overall_valid, bool)
         assert path.length == len(large_orders)
 
+    def test_caching_performance_improvement(self):
+        """Test that caching provides performance improvements."""
+        path = StaplePath()
+        interfaces = [0.1, 0.2, 0.3, 0.4]
+        
+        # Create medium-size path for performance testing
+        orders = create_large_staple_path(interfaces, n_cycles=50, turn_interface_pair=(1, 2))
+        add_systems_to_path(path, orders, "cache_test")
+        
+        # First call: populates cache
+        start_time = time.time()
+        orders_array1 = path._get_orders_array()
+        first_call_time = time.time() - start_time
+        
+        # Second call: should use cache
+        start_time = time.time()
+        orders_array2 = path._get_orders_array()
+        second_call_time = time.time() - start_time
+        
+        # Verify same array returned
+        assert orders_array1 is orders_array2
+        
+        # Second call should be significantly faster (cached)
+        assert second_call_time < first_call_time
+        
+        # Multiple calls with cache should be very fast
+        times = []
+        for _ in range(10):
+            start_time = time.time()
+            path._get_orders_array()
+            times.append(time.time() - start_time)
+        
+        # All cached calls should be very fast
+        assert all(t < 0.001 for t in times)  # Less than 1ms
+
+    def test_vectorized_operations_performance(self):
+        """Test that vectorized operations provide performance improvements."""
+        path = StaplePath()
+        interfaces = [0.1, 0.2, 0.3, 0.4]
+        
+        # Create path with known turn pattern
+        orders = create_staple_path_with_turn(interfaces, turn_at_interface_pair=(1, 2), 
+                                            start_region="A", extra_length=100)
+        add_systems_to_path(path, orders, "vectorized_test")
+        
+        # Test vectorized turn detection performance
+        orders_array = path._get_orders_array()
+        interfaces_array = np.array(interfaces)
+        
+        start_time = time.time()
+        start_turn, start_idx, start_extremal = path._check_start_turn(orders_array, interfaces_array)
+        start_turn_time = time.time() - start_time
+        
+        start_time = time.time()
+        end_turn, end_idx, end_extremal = path._check_end_turn(orders_array, interfaces_array)
+        end_turn_time = time.time() - start_time
+        
+        # Vectorized operations should be fast
+        assert start_turn_time < 0.01  # Less than 10ms
+        assert end_turn_time < 0.01    # Less than 10ms
+        
+        # Test border finding performance if turns are detected
+        if start_extremal is not None:
+            start_time = time.time()
+            left_border = path._find_border_vectorized(orders_array, start_extremal, interfaces[0], 'left')
+            border_time = time.time() - start_time
+            assert border_time < 0.01  # Less than 10ms
+
     def test_shooting_region_selection_efficiency(self):
         """Test efficiency of shooting region selection in large paths."""
         path = StaplePath()
@@ -152,17 +220,13 @@ class TestStaplePathPerformance:
         
         total_time = 0
         for orders, m_idx, lr in test_cases:
-            phasepoints = []
-            for i, order in enumerate(orders):
-                system = System()
-                system.order = [order]
-                system.config = (f"perf_{i}.xyz", i)
-                phasepoints.append(system)
+            # Convert orders to numpy array for turn_detected function
+            orders_array = np.array(orders)
             
             # Test many times for statistical significance
             start_time = time.time()
             for _ in range(1000):
-                result = turn_detected(phasepoints, interfaces, m_idx, lr)
+                result = turn_detected(orders_array, interfaces, m_idx, lr)
                 assert isinstance(result, bool)
             end_time = time.time()
             
@@ -181,7 +245,7 @@ class TestStaplePathPerformance:
             path = StaplePath()
             
             # Create CORRECT staple path (2000 points)
-            orders = create_large_staple_path(interfaces, n_cycles=200, turn_interface_idx=2)
+            orders = create_large_staple_path(interfaces, n_cycles=200, turn_interface_pair=(1, 2))
             add_systems_to_path(path, orders, f"mem_path_{path_id}")
             
             path.sh_region = (500, 1500)
@@ -206,7 +270,7 @@ class TestStaplePathPerformance:
         # All operations should complete successfully
         assert len(results) == 5
         assert all(isinstance(result[0], bool) for result in results)
-        assert all(isinstance(result[1], (int, type(None))) for result in results)
+        assert all(isinstance(result[1], (int, np.integer, type(None))) for result in results)
         assert all(result[2] > 0 for result in results)
 
 
@@ -341,7 +405,7 @@ class TestStaplePathBenchmarks:
             # Create CORRECT staple path with predictable pattern
             # Use number of cycles proportional to desired size
             n_cycles = max(1, size // 10)
-            orders = create_large_staple_path(interfaces, n_cycles=n_cycles, turn_interface_idx=2)
+            orders = create_large_staple_path(interfaces, n_cycles=n_cycles, turn_interface_pair=(1, 2))
             
             # Trim to exact size if needed
             if len(orders) > size:
@@ -371,7 +435,7 @@ class TestStaplePathBenchmarks:
         interfaces = [0.1, 0.2, 0.3, 0.4]
         
         # Create CORRECT medium-sized staple path
-        orders = create_large_staple_path(interfaces, n_cycles=100, turn_interface_idx=2)
+        orders = create_large_staple_path(interfaces, n_cycles=100, turn_interface_pair=(1, 2))
         add_systems_to_path(path, orders, "consistency")
         
         path.sh_region = (100, len(orders) - 100)

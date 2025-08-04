@@ -143,7 +143,9 @@ class TestAdvancedTurnDetection:
             # Turn detected should work on subsets
             subset_points = path.phasepoints[:i+1]
             if len(subset_points) >= 2:
-                result = turn_detected(subset_points, interfaces, 1, 1)
+                # Convert subset to orders array
+                subset_orders = np.array([pp.order[0] for pp in subset_points])
+                result = turn_detected(subset_orders, interfaces, 1, 1)
                 assert isinstance(result, bool)
 
     def test_interface_density_effects(self):
@@ -197,12 +199,15 @@ class TestAdvancedTurnDetection:
         
         interfaces = [0.15, 0.25, 0.35]
         
-        # Test turn_detected function with different directions
-        forward_result_right = turn_detected(forward_path.phasepoints, interfaces, 1, 1)
-        forward_result_left = turn_detected(forward_path.phasepoints, interfaces, 1, -1)
+        # Test turn_detected function with different directions - convert to orders arrays
+        forward_orders = np.array([pp.order[0] for pp in forward_path.phasepoints])
+        backward_orders = np.array([pp.order[0] for pp in backward_path.phasepoints])
         
-        backward_result_right = turn_detected(backward_path.phasepoints, interfaces, 1, 1)
-        backward_result_left = turn_detected(backward_path.phasepoints, interfaces, 1, -1)
+        forward_result_right = turn_detected(forward_orders, interfaces, 1, 1)
+        forward_result_left = turn_detected(forward_orders, interfaces, 1, -1)
+        
+        backward_result_right = turn_detected(backward_orders, interfaces, 1, 1)
+        backward_result_left = turn_detected(backward_orders, interfaces, 1, -1)
         
         # Forward path should be detected as right turn, backward as left turn
         assert isinstance(forward_result_right, bool)

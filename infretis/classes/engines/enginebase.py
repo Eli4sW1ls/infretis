@@ -126,7 +126,7 @@ class EngineBase(metaclass=ABCMeta):
                 success = True
                 stop = True
             # If we are using a StaplePath, we need to check the order:
-            elif turn_detected(path.phasepoints, interfaces, m_idx,
+            elif turn_detected(path._cached_orders, interfaces, m_idx,
                                -1 if op_loc < left else (1 if op_loc > right else None)):
                 status = "Order parameter is not monotonic!"
                 success = True

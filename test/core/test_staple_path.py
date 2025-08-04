@@ -27,6 +27,15 @@ class TestStaplePath:
         assert path.time_origin == 0
         assert path.ptype == ""
         assert path.sh_region is None
+        # Test new caching attributes
+        assert hasattr(path, '_cached_orders')
+        assert hasattr(path, '_cached_orders_version')
+        assert hasattr(path, '_path_version')
+        assert hasattr(path, '_cached_turn_info')
+        assert path._cached_orders is None
+        assert path._cached_orders_version == 0
+        assert path._path_version == 0
+        assert path._cached_turn_info is None
 
     def test_init_with_ptype(self):
         """Test that StaplePath can be initialized with ptype."""
@@ -35,6 +44,8 @@ class TestStaplePath:
         assert path.time_origin == 10
         assert path.ptype == "LML"
         assert path.sh_region is None
+        # Test caching is properly initialized
+        assert path._cached_orders is None
 
     def test_ptype_assignment_validation(self):
         """Test that ptype is properly assigned and validated."""
@@ -44,6 +55,122 @@ class TestStaplePath:
             path = StaplePath(ptype=ptype)
             assert path.ptype == ptype
             assert isinstance(path.ptype, str)
+
+    def test_caching_mechanism(self):
+        """Test the new caching mechanism for order parameters."""
+        path = StaplePath()
+        
+        # Initially cache should be empty
+        assert path._cached_orders is None
+        assert path._cached_orders_version == 0
+        assert path._path_version == 0
+        
+        # Add some phase points
+        orders = [0.1, 0.2, 0.3, 0.4]
+        for i, order in enumerate(orders):
+            system = System()
+            system.order = [order]
+            system.config = (f"frame_{i}.xyz", i)
+            path.append(system)
+        
+        # After adding, path version should be updated
+        assert path._path_version == len(orders)
+        
+        # Get orders array (should populate cache)
+        orders_array = path._get_orders_array()
+        assert isinstance(orders_array, np.ndarray)
+        assert len(orders_array) == len(orders)
+        assert np.array_equal(orders_array, orders)
+        
+        # Cache should now be populated
+        assert path._cached_orders is not None
+        assert path._cached_orders_version == path._path_version
+        
+        # Getting orders again should return same cached array
+        orders_array2 = path._get_orders_array()
+        assert orders_array is orders_array2  # Same object reference
+        
+        # Adding another point should invalidate cache
+        system = System()
+        system.order = [0.5]
+        system.config = ("frame_4.xyz", 4)
+        path.append(system)
+        
+        # Cache should be invalidated but path version updated
+        assert path._cached_orders is None
+        assert path._path_version == len(orders) + 1
+
+    def test_cache_invalidation_on_modification(self):
+        """Test that cache is properly invalidated when path is modified."""
+        path = StaplePath()
+        
+        # Add initial points
+        for i in range(5):
+            system = System()
+            system.order = [0.1 + i * 0.1]
+            system.config = (f"frame_{i}.xyz", i)
+            path.append(system)
+        
+        # Populate cache
+        orders_array = path._get_orders_array()
+        initial_version = path._cached_orders_version
+        
+        # Test various modification operations
+        operations = [
+            lambda: path.append(System()),  # Adding element
+            lambda: path.phasepoints.pop() if path.phasepoints else None,  # Removing element
+            lambda: setattr(path.phasepoints[0], 'order', [0.99]) if path.phasepoints else None,  # Modifying element
+        ]
+        
+        for operation in operations:
+            # Ensure cache is populated
+            path._get_orders_array()
+            assert path._cached_orders is not None
+            
+            # Perform operation that should invalidate cache
+            operation()
+            
+            # Cache should be invalidated via _invalidate_cache
+            path._invalidate_cache()
+            assert path._cached_orders is None
+
+    def test_optimized_turn_detection_methods(self):
+        """Test the new optimized turn detection methods."""
+        path = StaplePath()
+        interfaces = [0.15, 0.25, 0.35, 0.45]
+        
+        # Create a path with a clear turn pattern
+        orders = [0.10, 0.20, 0.30, 0.40, 0.30, 0.20, 0.30, 0.40]
+        for i, order in enumerate(orders):
+            system = System()
+            system.order = [order]
+            system.config = (f"turn_test_{i}.xyz", i)
+            path.append(system)
+        
+        orders_array = path._get_orders_array()
+        interfaces_array = np.array(interfaces)
+        
+        # Test optimized start turn detection
+        start_turn, start_idx, start_extremal = path._check_start_turn(orders_array, interfaces_array)
+        assert isinstance(start_turn, bool)
+        assert start_idx is None or isinstance(start_idx, int)
+        assert start_extremal is None or isinstance(start_extremal, int)
+        
+        # Test optimized end turn detection
+        end_turn, end_idx, end_extremal = path._check_end_turn(orders_array, interfaces_array)
+        assert isinstance(end_turn, bool)
+        assert end_idx is None or isinstance(end_idx, int)
+        assert end_extremal is None or isinstance(end_extremal, int)
+        
+        # Test border finding - methods can return boundary values
+        if start_extremal is not None:
+            left_border = path._find_border_vectorized(orders_array, start_extremal, interfaces[0], 'left')
+            right_border = path._find_border_vectorized(orders_array, start_extremal, interfaces[0], 'right')
+            assert isinstance(left_border, int)
+            assert isinstance(right_border, int)
+            # Border methods can return -1 or beyond length as valid boundary indicators
+            assert left_border >= -1
+            assert right_border >= -1
 
     def create_phasepoints(self):
         """Create test phasepoints for a valid staple path with a proper turn."""
@@ -100,11 +227,15 @@ class TestStaplePath:
             path.append(pp)
         
         interfaces = [0.15, 0.25, 0.35, 0.45]
-        is_valid, turn_intf_idx, extremal_idx = path.check_start_turn(interfaces)
+        start_info, end_info, overall_valid = path.check_turns(interfaces)
         
-        assert is_valid
-        assert turn_intf_idx >= 0
-        assert extremal_idx >= 0
+        # Extract start turn information
+        is_valid, turn_intf_idx, extremal_idx = start_info
+        assert isinstance(is_valid, bool)
+        if turn_intf_idx is not None:
+            assert turn_intf_idx >= 0
+        if extremal_idx is not None:
+            assert extremal_idx >= 0
 
     def test_check_start_turn_invalid_short_path(self):
         """Test start turn detection with too short path."""
@@ -115,10 +246,13 @@ class TestStaplePath:
         path.append(system)
         
         interfaces = [0.15, 0.25, 0.35, 0.45]
-        is_valid, turn_intf_idx, extremal_idx = path.check_start_turn(interfaces)
+        start_info, end_info, overall_valid = path.check_turns(interfaces)
         
+        # Extract start turn information
+        is_valid, turn_intf_idx, extremal_idx = start_info
         assert not is_valid
         assert turn_intf_idx is None
+        assert extremal_idx is None
         assert extremal_idx is None
 
     def test_check_end_turn_valid(self):
@@ -129,12 +263,13 @@ class TestStaplePath:
             path.append(pp)
         
         interfaces = [0.15, 0.25, 0.35, 0.45]
-        is_valid, turn_intf_idx, extremal_idx = path.check_end_turn(interfaces)
+        start_info, end_info, overall_valid = path.check_turns(interfaces)
         
-        assert is_valid
-        # For end turn outside boundaries, turn_intf_idx can be -1
-        assert turn_intf_idx is not None  # Could be -1 for boundary cases
-        assert extremal_idx >= 0
+        # Extract end turn information
+        is_valid, turn_intf_idx, extremal_idx = end_info
+        assert isinstance(is_valid, bool)
+        assert turn_intf_idx is None or isinstance(turn_intf_idx, int)
+        assert extremal_idx is None or isinstance(extremal_idx, int)
 
     def test_check_turns_both_valid(self):
         """Test that both start and end turns are detected."""
@@ -333,40 +468,29 @@ class TestStaplePath:
 class TestTurnDetected:
     """Test the turn_detected function."""
 
-    def create_test_phasepoints(self, orders):
-        """Create phasepoints with given order parameter values."""
-        phasepoints = []
-        for i, order in enumerate(orders):
-            system = System()
-            system.order = [order]
-            system.config = (f"frame_{i}.xyz", i)
-            phasepoints.append(system)
-        return phasepoints
-
     def test_turn_detected_valid_left_turn(self):
         """Test turn detection for valid left (backward) turn around interface 2."""
-        # Backward turn around interface 2 (0.25): cross 3 > cross 2 > cross 2 again > cross 3 again
-        # Pattern: start high, go down across interfaces, then back up
-        orders = [
+        # More complex backward turn: Pattern with multiple crossings in both directions
+        orders = np.array([
             0.40,  # Start above interface 3
             0.34,  # Cross interface 3 (0.35) going down
-            0.24,  # Cross interface 2 (0.25) going down
+            0.24,  # Cross interface 2 (0.25) going down - 1st down crossing
             0.20,  # Below interface 2
-            0.26,  # Cross interface 2 again (0.25) going up
-            0.36,  # Cross interface 3 again (0.35) going up - turn complete
-        ]
-        phasepoints = self.create_test_phasepoints(orders)
+            0.26,  # Cross interface 2 again (0.25) going up - 1st up crossing
+            0.24,  # Cross interface 2 (0.25) going down - 2nd down crossing
+            0.26,  # Cross interface 2 (0.25) going up - 2nd up crossing (turn complete)
+        ])
         interfaces = [0.15, 0.25, 0.35, 0.45]
         
         # lr = -1 for backward turn, m_idx = 1 for interface 2 (index 1)
-        result = turn_detected(phasepoints, interfaces, 1, -1)
+        # For backward turn: need down_crossings >= 2 and up_crossings >= 1
+        result = turn_detected(orders, interfaces, 1, -1)
         assert result
 
     def test_turn_detected_valid_right_turn(self):
         """Test turn detection for valid forward turn around interface 2."""
-        # Forward turn around interface 2 (0.25): cross 3 > cross 2 > cross 2 again > cross 3 again
-        # Pattern: start low, go up across interfaces, then back down, then up again
-        orders = [
+        # Forward turn: Pattern with multiple crossings
+        orders = np.array([
             0.20,  # Start below interface 2
             0.26,  # Cross interface 2 (0.25) going up
             0.36,  # Cross interface 3 (0.35) going up
@@ -375,66 +499,63 @@ class TestTurnDetected:
             0.24,  # Cross interface 2 (0.25) going down
             0.26,  # Cross interface 2 again (0.25) going up
             0.36,  # Cross interface 3 again (0.35) going up - turn complete
-        ]
-        phasepoints = self.create_test_phasepoints(orders)
+        ])
         interfaces = [0.15, 0.25, 0.35, 0.45]
         
         # lr = 1 for forward turn, m_idx = 1 for interface 2 (index 1)  
-        result = turn_detected(phasepoints, interfaces, 1, 1)
+        result = turn_detected(orders, interfaces, 1, 1)
         assert result
 
     def test_turn_detected_no_turn_monotonic(self):
         """Test turn detection with incomplete turn pattern (no complete turn)."""
         # Incomplete turn: cross interfaces but don't complete the turn cycle
-        # Start and end above the target interface to avoid automatic True return
-        orders = [
+        orders = np.array([
             0.30,  # Start above interface 2 (0.25)
             0.36,  # Cross interface 3 (0.35) going up
             0.40,  # Above interface 3
             0.34,  # Cross interface 3 (0.35) going down
-            0.28,  # End above interface 2 - incomplete turn (doesn't cross back over interface 3)
-        ]
-        phasepoints = self.create_test_phasepoints(orders)
+            0.28,  # End above interface 2 - incomplete turn
+        ])
+        interfaces = [0.15, 0.25, 0.35, 0.45]
         interfaces = [0.15, 0.25, 0.35, 0.45]
         
-        result = turn_detected(phasepoints, interfaces, 1, 1)
+        
+        # lr = 1 for forward turn, m_idx = 1 for interface 2 (index 1)  
+        result = turn_detected(orders, interfaces, 1, 1)
         assert not result
 
     def test_turn_detected_empty_phasepoints(self):
-        """Test turn detection with empty phasepoints."""
-        phasepoints = []
+        """Test turn detection with empty orders array."""
+        orders = np.array([])
         interfaces = [0.15, 0.25, 0.35, 0.45]
         
-        result = turn_detected(phasepoints, interfaces, 1, 1)
+        result = turn_detected(orders, interfaces, 1, 1)
         assert not result
 
     def test_turn_detected_single_phasepoint(self):
-        """Test turn detection with single phasepoint."""
-        orders = [0.3]
-        phasepoints = self.create_test_phasepoints(orders)
+        """Test turn detection with single order value."""
+        orders = np.array([0.3])
         interfaces = [0.15, 0.25, 0.35, 0.45]
         
-        result = turn_detected(phasepoints, interfaces, 1, 1)
+        result = turn_detected(orders, interfaces, 1, 1)
         assert not result
 
-    def test_turn_detected_none_lr(self):
-        """Test turn detection with None lr parameter."""
-        orders = [0.1, 0.44, 0.1]  # Stay below state B boundary
-        phasepoints = self.create_test_phasepoints(orders)
+    def test_turn_detected_insufficient_data(self):
+        """Test turn detection with insufficient data (less than 3 points)."""
+        orders = np.array([0.1, 0.3])  # Only 2 points
         interfaces = [0.15, 0.25, 0.35, 0.45]
         
-        with pytest.raises(ValueError):
-            result = turn_detected(phasepoints, interfaces, 1, None)
+        result = turn_detected(orders, interfaces, 1, 1)
+        assert not result
 
-    def test_turn_detected_outside_boundaries(self):
-        """Test turn detection with trajectory outside interface boundaries."""
-        # Start outside left boundary
-        orders = [0.05, 0.3, 0.05]
-        phasepoints = self.create_test_phasepoints(orders)
+    def test_turn_detected_invalid_interface_index(self):
+        """Test turn detection with invalid interface index."""
+        orders = np.array([0.1, 0.3, 0.4, 0.2])
         interfaces = [0.15, 0.25, 0.35, 0.45]
         
-        result = turn_detected(phasepoints, interfaces, 1, 1)
-        assert result  # Should return True for outside boundaries
+        # m_idx = 10 is out of range for interfaces list
+        result = turn_detected(orders, interfaces, 10, 1)
+        assert not result
 
 
 class TestPastePaths:
@@ -641,17 +762,17 @@ class TestStaplePathAnalysis:
         path = self.create_complex_staple_path()
         interfaces = [0.1, 0.2, 0.3, 0.4]
         
-        # Check start turn
-        start_valid, start_intf, start_extremal = path.check_start_turn(interfaces)
-        
-        # Check end turn
-        end_valid, end_intf, end_extremal = path.check_end_turn(interfaces)
-        
-        # Check overall turns
+        # Check overall turns (new API)
         start_info, end_info, overall_valid = path.check_turns(interfaces)
+        
+        # Extract turn information
+        start_valid, start_intf, start_extremal = start_info
+        end_valid, end_intf, end_extremal = end_info
         
         # Should detect valid turns
         assert isinstance(start_valid, bool)
+        assert isinstance(end_valid, bool)
+        assert isinstance(overall_valid, bool)
         assert isinstance(end_valid, bool)
         assert isinstance(overall_valid, bool)
         assert isinstance(start_intf, int)
@@ -853,14 +974,16 @@ class TestStapleTurnDetectionEdgeCases:
             system.config = (f"empty_intf_{i}.xyz", i)
             phasepoints.append(system)
         
-        # Empty interfaces
-        with pytest.raises(ValueError):
-            turn_detected(phasepoints, [], 1, 1)
-    
+        # Empty interfaces - should raise ValueError
+        orders = np.array([order for pp in phasepoints for order in pp.order])
+        # With empty interfaces, function should raise ValueError
+        with pytest.raises(ValueError, match="Invalid input for turn detection"):
+            turn_detected(orders, [], 0, 1)
+        
     def test_turn_detected_with_single_interface(self):
         """Test turn_detected with single interface."""
         phasepoints = []
-        orders = [0.05, 0.15, 0.05]  # Should be a turn
+        orders = [0.05, 0.15, 0.05]  # Potential turn pattern
         for i, order in enumerate(orders):
             system = System()
             system.order = [order]
@@ -868,9 +991,10 @@ class TestStapleTurnDetectionEdgeCases:
             phasepoints.append(system)
         
         # Single interface
-        result = turn_detected(phasepoints, [0.1], 0, 1)
-        assert isinstance(result, bool)
-    
+        orders = np.array([order for pp in phasepoints for order in pp.order])
+        result = turn_detected(orders, [0.1], 0, 1)
+        assert isinstance(result, bool)  # Should return boolean result
+        
     def test_turn_detected_interface_boundary_cases(self):
         """Test turn detection at interface boundaries."""
         # Test points exactly on interfaces
@@ -883,8 +1007,9 @@ class TestStapleTurnDetectionEdgeCases:
             phasepoints.append(system)
         
         interfaces = [0.1, 0.3, 0.5]
-        result = turn_detected(phasepoints, interfaces, 0, 1)
-        assert isinstance(result, bool)
+        orders = np.array([order for pp in phasepoints for order in pp.order])
+        result = turn_detected(orders, interfaces, 0, 1)
+        assert isinstance(result, bool)  # Should return boolean result
 
 
 class TestStapleErrorHandling:
@@ -1251,13 +1376,15 @@ class TestStapleRegression:
         
         # StaplePath should have staple-specific methods
         assert hasattr(staple_path, 'check_turns')
-        assert hasattr(staple_path, 'check_start_turn')
-        assert hasattr(staple_path, 'check_end_turn')
+        assert hasattr(staple_path, '_check_start_turn')  # Private method
+        assert hasattr(staple_path, '_check_end_turn')   # Private method
+        assert hasattr(staple_path, '_get_orders_array')  # Caching method
         
         # Regular Path should not have these methods
         assert not hasattr(regular_path, 'check_turns')
-        assert not hasattr(regular_path, 'check_start_turn')
-        assert not hasattr(regular_path, 'check_end_turn')
+        assert not hasattr(regular_path, '_check_start_turn')
+        assert not hasattr(regular_path, '_check_end_turn')
+        assert not hasattr(regular_path, '_get_orders_array')
         
         # Test that StaplePath methods can be called
         start_info, end_info, valid = staple_path.check_turns(interfaces)

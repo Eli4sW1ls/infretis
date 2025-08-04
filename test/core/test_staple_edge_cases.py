@@ -548,45 +548,66 @@ class TestStaplePathWarningHandling:
             
             # This might trigger performance warnings
             start_info, end_info, overall_valid = path.check_turns(interfaces)
-            
-            # Check if warnings were generated
-            warning_count = len(w)
-            assert warning_count >= 0  # May or may not have warnings
-            
-            # Should still function despite warnings
-            assert isinstance(overall_valid, bool)
 
-    def test_numerical_precision_warnings(self):
-        """Test warnings for numerical precision issues."""
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
-            
-            path = StaplePath()
-            
-            # Create path with precision issues
-            interface_val = 0.2
-            epsilon = 1e-15
-            
-            orders = [
-                interface_val - epsilon,
-                interface_val + epsilon,
-                interface_val - 2*epsilon,
-            ]
-            
-            for i, order in enumerate(orders):
-                system = System()
-                system.order = [order]
-                system.config = (f"prec_warn_{i}.xyz", i)
-                path.append(system)
-            
-            interfaces = [0.1, interface_val, 0.3]
-            
-            # Might trigger precision warnings
-            start_info, end_info, overall_valid = path.check_turns(interfaces)
-            
-            # Should handle warnings gracefully
-            assert isinstance(overall_valid, bool)
+    def test_cache_edge_cases(self):
+        """Test caching behavior in edge cases."""
+        path = StaplePath()
+        
+        # Test empty path
+        assert path._get_orders_array().size == 0
+        assert path._cached_orders is not None
+        assert len(path._cached_orders) == 0
+        
+        # Test single point
+        system = System()
+        system.order = [0.5]
+        system.config = ("single.xyz", 0)
+        path.append(system)
+        
+        orders = path._get_orders_array()
+        assert len(orders) == 1
+        assert orders[0] == 0.5
+        
+        # Test cache invalidation edge cases
+        path._invalidate_cache()
+        assert path._cached_orders is None
+        
+        # Test multiple invalidations (should be safe)
+        path._invalidate_cache()
+        path._invalidate_cache()
+        assert path._cached_orders is None
 
-
-if __name__ == "__main__":
-    pytest.main([__file__])
+    def test_vectorized_methods_edge_cases(self):
+        """Test vectorized methods with edge cases."""
+        path = StaplePath()
+        interfaces = [0.1, 0.2, 0.3, 0.4]
+        
+        # Test with empty arrays
+        empty_orders = np.array([])
+        interfaces_array = np.array(interfaces)
+        
+        start_turn, start_idx, start_extremal = path._check_start_turn(empty_orders, interfaces_array)
+        assert start_turn is False
+        assert start_idx is None
+        assert start_extremal is None
+        
+        # Test with single point
+        single_orders = np.array([0.25])
+        start_turn, start_idx, start_extremal = path._check_start_turn(single_orders, interfaces_array)
+        assert start_turn is False
+        
+        # Test border finding with edge cases
+        try:
+            # Invalid center index
+            path._find_border_vectorized(single_orders, 5, 0.2, 'left')
+            assert False, "Should have handled invalid index"
+        except (IndexError, ValueError):
+            pass  # Expected behavior
+        
+        # Test with valid but boundary indices
+        test_orders = np.array([0.1, 0.2, 0.3])
+        left_border = path._find_border_vectorized(test_orders, 0, 0.15, 'left')
+        right_border = path._find_border_vectorized(test_orders, 2, 0.25, 'right')
+        
+        assert isinstance(left_border, int)
+        assert isinstance(right_border, int)

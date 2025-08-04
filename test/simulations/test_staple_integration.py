@@ -1,6 +1,7 @@
 """Integration tests for complete staple path workflow."""
 import numpy as np
 import pytest
+import time
 from unittest.mock import Mock, patch, MagicMock
 import tempfile
 import os
@@ -311,6 +312,42 @@ class TestStapleWorkflowIntegration:
 class TestStaplePerformanceIntegration:
     """Test performance aspects of staple integration."""
     
+    def test_caching_integration_with_simulations(self):
+        """Test that caching works correctly in simulation contexts."""
+        path = StaplePath()
+        interfaces = [0.1, 0.2, 0.3, 0.4]
+        
+        # Create realistic simulation-like path
+        orders = [0.05, 0.15, 0.25, 0.35, 0.25, 0.15, 0.25, 0.35]
+        for i, order in enumerate(orders):
+            system = System()
+            system.order = [order]
+            system.config = (f"sim_cache_{i}.xyz", i)
+            path.append(system)
+        
+        # Test that multiple operations use caching efficiently
+        start_time = time.time()
+        
+        # Multiple turn checks (should benefit from caching)
+        results = []
+        for _ in range(10):
+            start_info, end_info, overall_valid = path.check_turns(interfaces)
+            results.append((start_info, end_info, overall_valid))
+        
+        elapsed_time = time.time() - start_time
+        
+        # All results should be identical
+        first_result = results[0]
+        for result in results[1:]:
+            assert result == first_result
+        
+        # Should be fast due to caching (less than 0.1 seconds for 10 calls)
+        assert elapsed_time < 0.1
+        
+        # Verify cache is populated and consistent
+        assert path._cached_orders is not None
+        assert path._cached_orders_version == path._path_version
+
     def test_large_scale_staple_simulation(self):
         """Test staple functionality with large-scale parameters."""
         config = {

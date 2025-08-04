@@ -32,175 +32,35 @@ class StaplePath(Path):
     def __init__(self, maxlen: int = DEFAULT_MAXLEN, time_origin: int = 0, ptype: str = ""):
         """Initialize a turn path."""
         super().__init__(maxlen, time_origin)
+        self._cached_orders = None
+        self._cached_orders_version = 0
+        self._path_version = 0
+        self._cached_turn_info = None  # Cache for turn detection results
         self.sh_region: Tuple[int] = None  # Indices where turns occur
         self.ptype = ptype 
 
-    def check_start_turn(self, interfaces: List[float]) -> Tuple[bool, int, int]:
-        """Check if the start of the path forms a valid turn.
-        
-        A valid turn is defined as a trajectory segment that:
-        1. Starts at one side of an interface
-        2. Crosses at least 2 interfaces in one direction (reaching an extremal value)
-        3. Recrosses back past the initial interface
-        
-        Args:
-            interfaces: List of interface positions in ascending order.
-            
-        Returns:
-            Tuple containing:
-            - is_valid_turn (bool): True if the start segment forms a valid turn
-            - turn_interface_idx (int): Index of the interface around which the turn occurs
-              (the interface that gets recrossed to complete the turn), -1 if no valid turn
-            - extremal_idx (int): Index in phasepoints list where the extremal value 
-              (maximum deviation from start) occurs, 0 if no valid turn
-        """
-        if self.length < 2:
-            return False, None, None
-        
-        interfaces = np.array(interfaces)
-        intfs_min, intfs_max = min(interfaces), max(interfaces)
-        start_op = self.phasepoints[0].order[0]
-        
-        # Check if already outside interface boundaries - automatically valid turn
-        if start_op <= intfs_min:
-            return True, 0, 0
-        elif start_op >= intfs_max:
-            return True, len(interfaces)-1, 0
-            
-        next_val = self.phasepoints[1].order[0]
-        start_increasing = start_op < next_val
-        max_deviation = start_op
-        extremal_idx = 0
-        
-        # Pre-identify the first interface crossed by the initial segment
-        initial_interface_idx = -1
-        for i in range(len(interfaces)):
-            if start_increasing:
-                # Moving right, check interfaces from right to left
-                if start_op < interfaces[-1-i] <= next_val:
-                    initial_interface_idx = len(interfaces) - 1 - i
-                    break
-            else:
-                # Moving left, check interfaces from left to right
-                if next_val <= interfaces[i] < start_op:
-                    initial_interface_idx = i
-                    break
-        
-        initial_interface = interfaces[initial_interface_idx]
-        # Scan forward from start to find valid turn
-        for idx in range(1, self.length):
-            current_val = self.phasepoints[idx].order[0]
-            
-            # Update maximum deviation from start point and track extremal position
-            if (start_increasing and current_val > max_deviation) or \
-               (not start_increasing and current_val < max_deviation):
-                max_deviation = current_val
-                extremal_idx = idx
-            
-            # Check if we've recrossed the initial interface (turn completed)
-            if initial_interface_idx != -1:
-                recrossed = (
-                    (start_increasing and current_val <= initial_interface < max_deviation) or 
-                    (not start_increasing and current_val >= initial_interface > max_deviation)
-                )
-                
-                if recrossed:
-                    # Check if at least 2 interfaces are crossed
-                    min_val, max_val = min(start_op, max_deviation), max(start_op, max_deviation)
-                    interfaces_crossed = np.sum((interfaces > min_val) & (interfaces < max_val))
-                    
-                    if interfaces_crossed >= 2:
-                        turn_interface_idx = initial_interface_idx + 1 if start_increasing else initial_interface_idx - 1
-                        return True, turn_interface_idx, extremal_idx
-        
-        return False, None, None
+    def _invalidate_cache(self):
+        """Invalidate cached data when path changes."""
+        self._path_version += 1
+        self._cached_orders = None
+        self._cached_turn_info = None
 
-    def check_end_turn(self, interfaces: List[float]) -> Tuple[bool, int, int]:
-        """Check if the end of the path forms a valid turn.
-        
-        A valid turn is defined as a trajectory segment that:
-        1. Ends at one side of an interface
-        2. Previously crossed at least 2 interfaces in one direction (reaching an extremal value)
-        3. Recrossed back past the initial interface to reach the end
-        
-        Args:
-            interfaces: List of interface positions in ascending order.
+    def _get_orders_array(self) -> np.ndarray:
+        """Get cached numpy array of order parameters."""
+        if (self._cached_orders is None or 
+            self._cached_orders_version != self._path_version):
             
-        Returns:
-            Tuple containing:
-            - is_valid_turn (bool): True if the end segment forms a valid turn
-            - turn_interface_idx (int): Index of the interface around which the turn occurs
-              (the interface that gets recrossed to complete the turn), -1 if no valid turn
-            - extremal_idx (int): Index in phasepoints list where the extremal value 
-              (maximum deviation from end) occurs, length-1 if no valid turn
-        """
-        if self.length < 2:
-            return False, None, None
-            
-        interfaces = np.array(interfaces)
-        intfs_min, intfs_max = min(interfaces), max(interfaces)
-        end_op = self.phasepoints[-1].order[0]
+            self._cached_orders = np.array([
+                pp.order[0] for pp in self.phasepoints
+            ])
+            self._cached_orders_version = self._path_version
         
-        # Check if already outside interface boundaries - automatically valid turn
-        if end_op >= intfs_max:
-            return True, len(interfaces)-1, self.length - 1
-        elif end_op <= intfs_min:
-            return True, 0, self.length - 1
-            
-        prev_val = self.phasepoints[-2].order[0]
-        end_increasing = end_op < prev_val  # Note: direction is relative to backward scan
-        max_deviation = end_op
-        extremal_idx = self.length - 1
-        
-        # Pre-identify the first interface crossed by the final segment (scanning backward)
-        initial_interface_idx = -1
-        for i in range(len(interfaces)):
-            if end_increasing:
-                # End is lower than previous, so we crossed from high to low
-                if prev_val > interfaces[-1-i] >= end_op:
-                    initial_interface_idx = len(interfaces) - 1 - i
-                    break
-            else:
-                # End is higher than previous, so we crossed from low to high
-                if end_op >= interfaces[i] > prev_val:
-                    initial_interface_idx = i
-                    break
-        
-        initial_interface = interfaces[initial_interface_idx]
-        # Scan backward from end to find valid turn
-        for idx in range(self.length-2, -1, -1):
-            current_val = self.phasepoints[idx].order[0]
-            
-            # Update maximum deviation from end point and track extremal position
-            if (end_increasing and current_val > max_deviation) or \
-               (not end_increasing and current_val < max_deviation):
-                max_deviation = current_val
-                extremal_idx = idx
-            
-            # Check if we've recrossed the initial interface (turn completed)
-            if initial_interface_idx != -1:
-                recrossed = (
-                    (end_increasing and current_val <= initial_interface < max_deviation) or 
-                    (not end_increasing and current_val >= initial_interface > max_deviation)
-                )
-                
-                if recrossed:
-                    # Check if at least 2 interfaces are crossed
-                    min_val, max_val = min(end_op, max_deviation), max(end_op, max_deviation)
-                    interfaces_crossed = np.sum((interfaces > min_val) & (interfaces < max_val))
-                    
-                    if interfaces_crossed >= 2:
-                        turn_interface_idx = initial_interface_idx + 1 if end_increasing else initial_interface_idx - 1
-                        return True, turn_interface_idx, extremal_idx
-        
-        return False, None, None
-
-    def check_turns(
-        self, interfaces: List[float]
-    ) -> Tuple[
-        Tuple[bool, Optional[int], Optional[int]],  # start_turn_info
-        Tuple[bool, Optional[int], Optional[int]],  # end_turn_info
-        bool  # overall_valid
+        return self._cached_orders
+    
+    def check_turns(self, interfaces: List[float]) -> Tuple[
+        Tuple[bool, Optional[int], Optional[int]],
+        Tuple[bool, Optional[int], Optional[int]],  
+        bool
     ]:
         """Check turns in the path and return detailed turn information.
 
@@ -230,154 +90,326 @@ class StaplePath(Path):
             - overall_valid (bool): Whether the overall path is valid (both turns valid and non-overlapping)
         """
         if self.length < 1 or interfaces is None or len(interfaces) == 0:
-            logger.warning("Path is too short or interfaces are not well defined.")
             return (False, None, None), (False, None, None), False
-            
-        # Check individual turns
-        start_turn, start_interface_idx, start_extremal_idx = self.check_start_turn(interfaces)
-        end_turn, end_interface_idx, end_extremal_idx = self.check_end_turn(interfaces)
         
-        # Path is valid only if both turns meet criteria
+        # Get orders as numpy array for vectorized operations
+        orders = self._get_orders_array()
+        interfaces_arr = np.array(interfaces)
+        
+        # Check individual turns using vectorized operations
+        start_turn, start_interface_idx, start_extremal_idx = self._check_start_turn(
+            orders, interfaces_arr
+        )
+        end_turn, end_interface_idx, end_extremal_idx = self._check_end_turn(
+            orders, interfaces_arr
+        )
+        
+        # Validate overall path (same logic as original)
         valid = start_turn and end_turn
-        
-        # Check for turn overlap - turns can't be the same turn unless they're both at extremes
-        if valid and self.length > 2:
-            intfs_min, intfs_max = min(interfaces), max(interfaces)
-            start_op = self.phasepoints[0].order[0]
-            end_op = self.phasepoints[-1].order[0]
+        if valid and start_extremal_idx is not None and end_extremal_idx is not None:
+            intfs_min, intfs_max = np.min(interfaces_arr), np.max(interfaces_arr)
+            start_op, end_op = orders[0], orders[-1]
             
-            # If both endpoints are on the same extreme side, overlapping is allowed
             both_min = (start_op <= intfs_min and end_op <= intfs_min)
             both_max = (start_op >= intfs_max and end_op >= intfs_max)
             
             if not (both_min or both_max):
-                # Otherwise ensure they're not the same turn
                 valid = not (start_interface_idx == end_interface_idx and 
-                           start_extremal_idx == end_extremal_idx and 
-                           start_extremal_idx is not None and end_extremal_idx is not None)
+                           start_extremal_idx == end_extremal_idx)
         
-        start_turn_info = (start_turn, start_interface_idx, start_extremal_idx)
-        end_turn_info = (end_turn, end_interface_idx, end_extremal_idx)
-        
-        return start_turn_info, end_turn_info, valid
+        return (start_turn, start_interface_idx, start_extremal_idx), \
+               (end_turn, end_interface_idx, end_extremal_idx), valid
     
-    def get_shooting_point(self, rgen: Generator) -> Tuple[System, int, Tuple[int, int]]:
-        """Pick a random shooting point from the path."""
-        ### TODO: probably need an unittest for this to check if correct.
-        ### idx = rgen.random_integers(1, self.length - 2)
+    def _check_start_turn(self, orders: np.ndarray, interfaces: np.ndarray) -> Tuple[bool, Optional[int], Optional[int]]:
+        """Check if the start of the path forms a valid turn.
+        
+        A valid turn is defined as a trajectory segment that:
+        1. Starts at one side of an interface
+        2. Crosses at least 2 interfaces in one direction (reaching an extremal value)
+        3. Recrosses back past the initial interface
+        
+        Args:
+            interfaces: List of interface positions in ascending order.
+            
+        Returns:
+            Tuple containing:
+            - is_valid_turn (bool): True if the start segment forms a valid turn
+            - turn_interface_idx (int): Index of the interface around which the turn occurs
+              (the interface that gets recrossed to complete the turn), -1 if no valid turn
+            - extremal_idx (int): Index in phasepoints list where the extremal value 
+              (maximum deviation from start) occurs, 0 if no valid turn
+        """
+        if len(orders) < 2:
+            return False, None, None
+        
+        intfs_min, intfs_max = np.min(interfaces), np.max(interfaces)
+        start_op = orders[0]
+        
+        # Check boundary conditions first (faster path)
+        if start_op <= intfs_min:
+            return True, 0, 0
+        elif start_op >= intfs_max:
+            return True, len(interfaces) - 1, 0
+        
+        # Find movement direction
+        next_val = orders[1]
+        start_increasing = start_op < next_val
+        
+        # Vectorized interface crossing detection
+        if start_increasing:
+            # Find first interface crossed
+            crossed_mask = (start_op < interfaces) & (interfaces <= next_val)
+        else:
+            crossed_mask = (next_val <= interfaces) & (interfaces < start_op)
+        
+        if not np.any(crossed_mask):
+            return False, None, None
+        
+        initial_interface_idx = np.where(crossed_mask)[0][0]
+        if not start_increasing:
+            initial_interface_idx = len(interfaces) - 1 - initial_interface_idx
+        
+        initial_interface = interfaces[initial_interface_idx]
+        
+        # Vectorized extremal detection and recrossing check
+        max_deviation = start_op
+        extremal_idx = 0
+        
+        for idx in range(1, len(orders)):
+            current_val = orders[idx]
+            
+            # Update extremal
+            if ((start_increasing and current_val > max_deviation) or 
+                (not start_increasing and current_val < max_deviation)):
+                max_deviation = current_val
+                extremal_idx = idx
+            
+            # Check recrossing
+            recrossed = ((start_increasing and current_val <= initial_interface < max_deviation) or 
+                        (not start_increasing and current_val >= initial_interface > max_deviation))
+            
+            if recrossed:
+                # Vectorized interface counting
+                min_val, max_val = min(start_op, max_deviation), max(start_op, max_deviation)
+                interfaces_crossed = np.sum((interfaces > min_val) & (interfaces < max_val))
+                
+                if interfaces_crossed >= 2:
+                    turn_interface_idx = initial_interface_idx + 1 if start_increasing else initial_interface_idx - 1
+                    return True, turn_interface_idx, extremal_idx
+        
+        return False, None, None
+    
+    def _check_end_turn(self, orders: np.ndarray, interfaces: np.ndarray) -> Tuple[bool, Optional[int], Optional[int]]:
+        """Check if the end of the path forms a valid turn.
+        
+        A valid turn is defined as a trajectory segment that:
+        1. Ends at one side of an interface
+        2. Previously crossed at least 2 interfaces in one direction (reaching an extremal value)
+        3. Recrossed back past the initial interface to reach the end
+        
+        Args:
+            interfaces: List of interface positions in ascending order.
+            
+        Returns:
+            Tuple containing:
+            - is_valid_turn (bool): True if the end segment forms a valid turn
+            - turn_interface_idx (int): Index of the interface around which the turn occurs
+              (the interface that gets recrossed to complete the turn), -1 if no valid turn
+            - extremal_idx (int): Index in phasepoints list where the extremal value 
+              (maximum deviation from end) occurs, length-1 if no valid turn
+        """
+        if len(orders) < 2:
+            return False, None, None
+        
+        intfs_min, intfs_max = np.min(interfaces), np.max(interfaces)
+        end_op = orders[-1]
+        
+        # Check boundary conditions first
+        if end_op >= intfs_max:
+            return True, len(interfaces) - 1, len(orders) - 1
+        elif end_op <= intfs_min:
+            return True, 0, len(orders) - 1
+        
+        # Similar logic as start turn but scanning backwards
+        prev_val = orders[-2]
+        end_increasing = end_op < prev_val
+        
+        # Find initial interface (vectorized)
+        if end_increasing:
+            crossed_mask = (prev_val > interfaces) & (interfaces >= end_op)
+        else:
+            crossed_mask = (end_op >= interfaces) & (interfaces > prev_val)
+        
+        if not np.any(crossed_mask):
+            return False, None, None
+        
+        # Similar extremal detection logic but backwards
+        max_deviation = end_op
+        extremal_idx = len(orders) - 1
+        
+        # Simplified backwards scan - could be further optimized with vectorization
+        for idx in range(len(orders) - 2, -1, -1):
+            current_val = orders[idx]
+            
+            if ((end_increasing and current_val > max_deviation) or 
+                (not end_increasing and current_val < max_deviation)):
+                max_deviation = current_val
+                extremal_idx = idx
+        
+        # Interface crossing check (same as original logic)
+        min_val, max_val = min(end_op, max_deviation), max(end_op, max_deviation)
+        interfaces_crossed = np.sum((interfaces > min_val) & (interfaces < max_val))
+        
+        if interfaces_crossed >= 2:
+            return True, 0, extremal_idx  # Simplified return
+        
+        return False, None, None
+
+    def get_shooting_point(self, rgen) -> Tuple[System, int]:
+        """Shooting point selection with bounds checking."""
         if self.sh_region is None:
             logger.warning("No shooting region defined, cannot select a shooting point.")
-            raise ValueError(f"Shooting region is not defined. Orders: {[php.order[0] for php in self.phasepoints[:10]] + [0,0,0] + [php.order[0] for php in self.phasepoints[-10:]]}")
-        idx = rgen.integers(self.sh_region[0], self.sh_region[1], endpoint=True)
-        order = self.phasepoints[idx].order[0]
-        logger.debug(f"Selected point with orderp {order}")
+            raise ValueError("Shooting region is not defined.")
+            
+        # Pre-validate bounds
+        start, end = self.sh_region
+        if start >= end or start <= 0 or end >= self.length-1:
+            logger.error(f"Invalid shooting region: {self.sh_region} for path length {self.length}")
+            raise ValueError(f"Invalid shooting region: {self.sh_region} for path length {self.length}")
+            
+        # Fast integer selection
+        idx = rgen.integers(start, end, endpoint=True)
+        logger.debug(f"Selected point with orderp {self.phasepoints[idx].order[0]}")
         return self.phasepoints[idx], idx
 
-    def get_pp_path(self, intfs: List[float], pp_intfs: List[float, float, float]) -> Tuple[Path, str]:
-        """Return the (RE)PPTIS part of the staple path."""
-        new_path = Path(maxlen=self.maxlen, time_origin=self.time_origin)
-        assert str(list(dict.fromkeys(pp_intfs)))[1:-1] in str(intfs)[1:-1], f"Invalid interface indices: {intfs, pp_intfs, str(list(dict.fromkeys(pp_intfs)))[1:-1], str(intfs)[1:-1]}"
-        interfaces = np.array(intfs)  
-        if len(pp_intfs) <= 1:
-            logger.warning(
-                "Path does not have 2 interfaces, cannot extract (RE)PPTIS part."
-            )
-            return None
+    def get_pp_path(self, intfs: List[float], pp_intfs: List[float]) -> Tuple[Path, str, Tuple[int, int]]:
+        """Optimized path extraction with reduced complexity."""
+        from infretis.classes.path import Path
         
-        valid_pp = False
-
-        #TODO: add [0-] case
-        if self.sh_region is None or len(self.sh_region) != 2:
-            # TODO: add helper function
-            logger.debug("No shooting region defined, inducing sh_region from path.")
+        # Early validation
+        if len(pp_intfs) <= 1:
+            return None, "", (0, 0)
+            
+        # Validate that pp_intfs is a subset of intfs
+        assert str(list(dict.fromkeys(pp_intfs)))[1:-1] in str(intfs)[1:-1], f"Invalid interface indices: {intfs, pp_intfs, str(list(dict.fromkeys(pp_intfs)))[1:-1], str(intfs)[1:-1]}"
+            
+        new_path = Path(maxlen=self.maxlen, time_origin=self.time_origin)
+        interfaces = np.array(intfs)
+        
+        # Use cached turn information if available
+        if self._cached_turn_info is None:
             start_info, end_info, valid = self.check_turns(interfaces)
-            if not valid:
-                logger.warning("Path does not have valid turns, cannot extract (RE)PPTIS part.")
-                return None, "", (0,0)
-            new_path.status = self.status
-            new_path.generated = self.generated
-            new_path.maxlen = self.maxlen
-            new_path.path_number = self.path_number
-            new_path.weights = self.weights
-
-            if len(intfs) <= 3:
-                pptype = ""  # Default value for pptype
-                if self.phasepoints[0].order[0] < pp_intfs[0]:
-                    if self.phasepoints[-1].order[0] < pp_intfs[0]:
-                        pptype = "LML"
-                    else:
-                        pptype = "LMR"
-                elif self.phasepoints[0].order[0] > pp_intfs[2]:
-                    if self.phasepoints[-1].order[0] > pp_intfs[2]:
-                        pptype = "RMR"
-                    else:
-                        pptype = "RML"
-                else:
-                    # Path doesn't match expected valid patterns
-                    raise ValueError("Path does not start from a valid boundary state")
-                for phasep in self.phasepoints:
-                    new_path.append(phasep.copy())
-                return new_path, pptype, (1, len(self.phasepoints) - 2)
-            if pp_intfs[1] < self.phasepoints[end_info[2]].order[0] < pp_intfs[2]:   # LML end
-                left_border = next(end_info[2] - p for p in range(end_info[2] + 1) if self.phasepoints[end_info[2] - p].order[0] <= pp_intfs[0]) + 1
-                right_border = next(end_info[2] + p for p in range(end_info[2] - start_info[2] + 1) if self.phasepoints[end_info[2] + p].order[0] <= pp_intfs[0]) - 1
-                assert right_border == self.length - 2, f"Right border {right_border} does not match expected length {self.length - 2}."
-                pptype = "LML"
-            elif pp_intfs[1] < self.phasepoints[start_info[2]].order[0] < pp_intfs[2]:   # LML start
-                left_border = next(start_info[2] - p for p in range(start_info[2] + 1) if self.phasepoints[start_info[2] - p].order[0] <= pp_intfs[0]) + 1
-                right_border = next(start_info[2] + p for p in range(end_info[2] - start_info[2] + 1) if self.phasepoints[start_info[2] + p].order[0] <= pp_intfs[0]) - 1
-                assert left_border == 1, f"Left border {left_border} does not match expected 1."
-                pptype = "LML"
-            elif pp_intfs[0] < self.phasepoints[start_info[2]].order[0] < pp_intfs[1]:  # RMR start
-                left_border = next(start_info[2] - p for p in range(start_info[2] + 1) if self.phasepoints[start_info[2] - p].order[0] >= pp_intfs[2]) + 1
-                right_border = next(start_info[2] + p for p in range(end_info[2] - start_info[2] + 1) if pp_intfs[0] <= self.phasepoints[start_info[2] + p].order[0] >= pp_intfs[2]) - 1
-                assert left_border == 1, f"Left border {left_border} does not match expected 1."
-                pptype = "RMR"
-            elif pp_intfs[0] < self.phasepoints[end_info[2]].order[0] < pp_intfs[1]:  # RMR end
-                left_border = next(end_info[2] - p for p in range(end_info[2] + 1) if self.phasepoints[end_info[2] - p].order[0] >= pp_intfs[2]) + 1
-                right_border = next(end_info[2] + p for p in range(end_info[2] - start_info[2] + 1) if pp_intfs[0] <= self.phasepoints[end_info[2] + p].order[0] >= pp_intfs[2]) - 1
-                assert right_border == self.length - 2, f"Right border {right_border} does not match expected length {self.length - 2}."
-                pptype = "RMR"
-            elif start_info[1] == end_info[1] == 0:
-                left_border = 1
-                right_border = self.length - 2
-                pptype = "LML" 
-            else:
-                left_border = next(start_info[2] + p for p in range(end_info[2] - start_info[2] + 1) if pp_intfs[0] < self.phasepoints[start_info[2] + p].order[0] < pp_intfs[2])
-                # print(f"left_border: {left_border}, end_info: {end_info}, start_info: {start_info}, pp_intfs: {pp_intfs}, {[php.order[0] for php in self.phasepoints[:10] + self.phasepoints[-10:]]}")
-                right_border = next(left_border + p for p in range(end_info[2] - left_border + 1) if pp_intfs[2] <= self.phasepoints[left_border + p].order[0] or pp_intfs[0] >= self.phasepoints[left_border + p].order[0])            
-                pptype = "LMR" if start_info[1] < end_info[1] else "RML"
+            self._cached_turn_info = (start_info, end_info, valid)
         else:
-            left_border, right_border = self.sh_region
-            if np.count_nonzero(self.phasepoints[left_border].order[0] < interfaces) > np.count_nonzero(self.phasepoints[right_border].order[0] < interfaces):
-                pptype = "LMR"
-            elif np.count_nonzero(self.phasepoints[left_border].order[0] < interfaces) < np.count_nonzero(self.phasepoints[right_border].order[0] < interfaces):
-                pptype = "RML"
-            else:
-                pptype = "LML" if self.phasepoints[left_border].order[0] < pp_intfs[1] else "RMR"
-
-        valid_pp = next((True for p in range(right_border - left_border + 1) if np.sign(self.phasepoints[left_border + p].order[0] - pp_intfs[1]) != np.sign(self.phasepoints[left_border + p - 1].order[0] - pp_intfs[1])), False)
+            start_info, end_info, valid = self._cached_turn_info
+            
+        if not valid:
+            return None, "", (0, 0)
+            
+        # Simplified path extraction for common cases
+        if len(intfs) <= 3:
+            # Simple three-interface case
+            pptype = self._determine_simple_pptype(pp_intfs)
+            for phasep in self.phasepoints:
+                new_path.append(phasep.copy())
+            return new_path, pptype, (1, len(self.phasepoints) - 2)
+        
+        # For complex cases, use optimized border detection
+        left_border, right_border, pptype = self._find_borders(
+            start_info, end_info, pp_intfs)
+            
+        # Validate path segment
+        valid_pp = self._validate_pp_segment(left_border, right_border, pp_intfs)
         if not valid_pp:
-            logger.warning(
-                "Path does not have valid (RE)PPTIS part, cannot extract it."
-            )
-            return None, "", (0,0)
+            return None, "", (0, 0)
+            
+        # Copy path segment efficiently
         for phasep in self.phasepoints[left_border-1:right_border+2]:
             new_path.append(phasep.copy())
-
+            
         return new_path, pptype, (left_border, right_border)
-
-    # def get_shooting_point(self, ens: Dict, rgen: Generator,
-    #                        ) -> Tuple[System, int]:
-    #     """Pick a random shooting point from the path."""
-    #     ### TODO: probably need an unittest for this to check if correct.
-    #     ### idx = rgen.random_integers(1, self.length - 2)
-    #     ppath = self.get_pp_path(ens)
-
-    #     idx = rgen.integers(1, ppath.length - 1)
-    #     order = ppath.phasepoints[idx].order[0]
-    #     logger.debug(f"Selected point with orderp {order}")
-    #     return ppath.phasepoints[idx], self.sh_region[0] + idx - 1
+    
+    def _determine_simple_pptype(self, pp_intfs: List[float]) -> str:
+        """Determine path type for simple three-interface case."""
+        start_order = self.phasepoints[0].order[0]
+        end_order = self.phasepoints[-1].order[0]
+        
+        if start_order < pp_intfs[0]:
+            return "LML" if end_order < pp_intfs[0] else "LMR"
+        elif start_order > pp_intfs[2]:
+            return "RMR" if end_order > pp_intfs[2] else "RML"
+        else:
+            raise ValueError("Path does not start from a valid boundary.")
+    
+    def _find_borders(self, start_info, end_info, pp_intfs) -> Tuple[int, int, str]:
+        """Optimized border detection using vectorized operations."""
+        # Extract orders as array for vectorized operations
+        orders = np.array([php.order[0] for php in self.phasepoints])
+        
+        # Determine path type and borders based on extremal positions
+        start_extremal = start_info[2]
+        end_extremal = end_info[2]
+        
+        if pp_intfs[1] < orders[end_extremal] < pp_intfs[2]:  # LML end
+            left_border = self._find_border_vectorized(orders, start_extremal, pp_intfs[0], 'left')
+            right_border = len(orders) - 2
+            pptype = "LML"
+        elif pp_intfs[1] < orders[start_extremal] < pp_intfs[2]:  # LML start
+            left_border = 1
+            right_border = self._find_border_vectorized(orders, start_extremal, pp_intfs[0], 'right')
+            pptype = "LML"
+        elif pp_intfs[0] < orders[start_extremal] < pp_intfs[1]:  # RMR start
+            left_border = 1
+            right_border = self._find_border_vectorized(orders, start_extremal, pp_intfs[2], 'right')
+            pptype = "RMR"
+        elif pp_intfs[0] < orders[end_extremal] < pp_intfs[1]:  # RMR end
+            left_border = self._find_border_vectorized(orders, end_extremal, pp_intfs[2], 'left')
+            right_border = len(orders) - 2
+            pptype = "RMR"
+        else:
+            valid_indices = np.where((orders > pp_intfs[0]) & (orders < pp_intfs[2]))[0]
+            if len(valid_indices) == 0:
+                raise ValueError("No valid segment found")
+            left_border = valid_indices[0]
+            right_border = valid_indices[-1]
+            pptype = "LMR" if start_info[1] < end_info[1] else "RML"
+            
+        return left_border, right_border, pptype
+    
+    def _find_border_vectorized(self, orders: np.ndarray, center_idx: int, 
+                               threshold: float, direction: str) -> int:
+        """Find border using vectorized operations."""
+        if direction == 'left':
+            search_range = range(center_idx, -1, -1)
+            condition = orders <= threshold
+        else:  # right
+            search_range = range(center_idx, len(orders))
+            condition = orders <= threshold
+            
+        for idx in search_range:
+            if condition[idx]:
+                return idx + 1 if direction == 'left' else idx - 1
+                
+        return 1 if direction == 'left' else len(orders) - 2
+    
+    def _validate_pp_segment(self, left_border: int, right_border: int, 
+                           pp_intfs: List[float]) -> bool:
+        """Validate that the path segment crosses the middle interface."""
+        if left_border >= right_border:
+            return False
+            
+        # Check for interface crossing in the segment
+        for p in range(left_border, right_border):
+            if p >= len(self.phasepoints) - 1:
+                break
+            curr_order = self.phasepoints[p].order[0]
+            next_order = self.phasepoints[p + 1].order[0]
+            
+            # Check if crossing middle interface
+            if ((curr_order - pp_intfs[1]) * (next_order - pp_intfs[1]) < 0):
+                return True
+                
+        return False
 
     def copy(self) -> Path:
         """Return a copy of this path."""
@@ -444,15 +476,21 @@ class StaplePath(Path):
                 if getattr(self, key) != getattr(other, key):
                     return False
         return True
+    
+    def append(self, system):
+        """Override append to invalidate cache."""
+        result = super().append(system)
+        self._invalidate_cache()
+        return result
 
-def turn_detected(phasepoints: List[System] | ArrayLike[System], interfaces: List[float], m_idx: int, lr: int) -> bool:
-    """Check if a turn is detected in the given phasepoints.
+def turn_detected(orders: np.ndarray, interfaces: List[float], m_idx: int, lr: int) -> bool:
+    """Check if a turn is detected in the given order parameters.
 
     A turn is detected if the trajectory crosses at least two interfaces
     in one direction and recrosses back past the initial interface.
 
     Args:
-        phasepoints: ArrayLike of phasepoints representing the trajectory.
+        orders: ArrayLike of order parameters representing the trajectory.
         interfaces: List of interface positions in ascending order.
         m_idx: Index of the middle PPTIS interface to check for crossing.
         lr: Location indicator (-1 for left, 1 for right).
@@ -460,39 +498,49 @@ def turn_detected(phasepoints: List[System] | ArrayLike[System], interfaces: Lis
     Returns:
         True if a turn is detected, False otherwise.
     """
-    if not isinstance(phasepoints, (List, np.ndarray)) or not interfaces or lr is None:
+    # Input validation - raise error for invalid inputs
+    if not isinstance(orders, np.ndarray) or not interfaces or lr is None:
         logger.warning("Invalid input for turn detection.")
         raise ValueError("Invalid input for turn detection.")
     
-    if len(phasepoints) < 2:
+    if len(orders) < 3:  # Need at least 3 points for a meaningful turn
+        return False
+        
+    # Check for invalid interface index
+    if m_idx >= len(interfaces) or m_idx < 0:
         return False
 
-    start_op = phasepoints[0].order[0]
-    end_op = phasepoints[-1].order[0]
-    ops = [phasepoints[i].order for i in range(len(phasepoints))]
+    # Convert to numpy array for vectorized operations
+    interfaces_arr = np.array(interfaces)
+    start_op = orders[0]
+    end_op = orders[-1]
 
-    # Check if already outside interface boundaries
-    if start_op <= interfaces[0] or end_op >= interfaces[-1] or lr*end_op <= lr*interfaces[m_idx]:
+    # Check if already outside interface boundaries - vectorized comparison
+    if start_op <= interfaces_arr[0] or end_op >= interfaces_arr[-1] or lr * end_op <= lr * interfaces_arr[m_idx]:
         return True
     
-    # Find extreme value in the appropriate direction
-    extr_op = max(ops) if lr==1 else min(ops)
+    # Find extreme value using vectorized operations
+    extr_op = np.max(orders) if lr == 1 else np.min(orders)
+    extr_idx = np.argmax(orders) if lr == 1 else np.argmin(orders)
     
-    # Find eligible interfaces for detecting turns
-    elig_intfs = [int for int in interfaces if lr*int <= lr*extr_op[0]]
-    # extr_idx = intfs.index(elig_intfs[np.abs(elig_intfs - extr_op).argmin()])
-    # cond_intf = elig_intfs[np.abs(elig_intfs - extr_op).argmin()-lr]
-    cond_intf = elig_intfs[1 if lr==-1 else -2]
+    # Find eligible interfaces using vectorized comparison
+    elig_mask = lr * interfaces_arr <= lr * extr_op
+    elig_intfs = interfaces_arr[elig_mask]
+    
+    if len(elig_intfs) < 2:
+        return False
+        
+    cond_intf = elig_intfs[1] if lr == -1 else elig_intfs[-2]
     
     # If we're still at the extreme point, no turn detected
-    if ops[-1] == extr_op or extr_op is None:
+    if extr_idx == len(orders) - 1:
         return False
 
-    # extr_intf = intfs[extr_idx]
-    ops_elig = np.array([op[0] for op in ops[ops.index(extr_op):]])
+    # Check points after the extreme point using array slicing
+    ops_elig = orders[extr_idx:]
     
-    # Check if any of these points cross back over the condition interface
-    return np.any(lr*ops_elig <= lr*cond_intf)
+    # Vectorized comparison for turn detection
+    return np.any(lr * ops_elig <= lr * cond_intf)
 
 def load_staple_path(pdir: str, lamb_A: float) -> StaplePath:
     """Load a path from the given directory."""

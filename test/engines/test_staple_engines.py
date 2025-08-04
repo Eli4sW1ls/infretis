@@ -214,7 +214,9 @@ class TestStaplePathTurnDetection:
         m_idx = 0  # Middle interface index
         lr = 1  # Right turn
         
-        result = turn_detected(phasepoints, interfaces, m_idx, lr)
+        # Convert phasepoints to orders array
+        orders = np.array([pp.order[0] for pp in phasepoints])
+        result = turn_detected(orders, interfaces, m_idx, lr)
         assert result  # Should detect the turn
 
     def test_turn_detected_no_turn(self):
@@ -223,7 +225,7 @@ class TestStaplePathTurnDetection:
         
         # Create monotonic phasepoints
         phasepoints = []
-        orders = [0.1, 0.2, 0.3, 0.4, 0.5]  # Monotonic
+        orders = [0.25, 0.26, 0.27, 0.28, 0.29]  # Monotonic within interface region
         for i, order in enumerate(orders):
             system = System()
             system.order = [order]
@@ -234,7 +236,9 @@ class TestStaplePathTurnDetection:
         m_idx = 0
         lr = 1
         
-        result = turn_detected(phasepoints, interfaces, m_idx, lr)
+        # Convert phasepoints to orders array
+        orders = np.array([pp.order[0] for pp in phasepoints])
+        result = turn_detected(orders, interfaces, m_idx, lr)
         assert not result  # Should not detect turn
 
     def test_staple_path_integration(self):

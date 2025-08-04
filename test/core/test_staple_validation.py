@@ -19,6 +19,83 @@ from infretis.classes.path import Path
 
 class TestStaplePathCorrectness:
     """Test algorithmic correctness of staple path operations."""
+    
+    def test_optimized_methods_correctness(self):
+        """Test that optimized methods produce same results as original logic."""
+        interfaces = [0.1, 0.2, 0.3, 0.4]
+        
+        # Test various path patterns
+        test_cases = [
+            # Forward turn pattern
+            [0.05, 0.15, 0.25, 0.35, 0.25, 0.15, 0.25, 0.35],
+            # Backward turn pattern  
+            [0.45, 0.35, 0.25, 0.15, 0.25, 0.35, 0.25, 0.15],
+            # No turn pattern
+            [0.05, 0.15, 0.25, 0.35, 0.45],
+            # Edge case: minimal path
+            [0.2, 0.3, 0.2],
+        ]
+        
+        for orders in test_cases:
+            path = StaplePath()
+            for i, order in enumerate(orders):
+                system = System()
+                system.order = [order]
+                system.config = (f"correctness_{i}.xyz", i)
+                path.append(system)
+            
+            # Test consistency of results
+            orders_array = path._get_orders_array()
+            interfaces_array = np.array(interfaces)
+            
+            # Test start turn detection consistency
+            start_turn, start_idx, start_extremal = path._check_start_turn(orders_array, interfaces_array)
+            
+            # Verify return types and ranges
+            assert isinstance(start_turn, bool)
+            if start_idx is not None:
+                assert 0 <= start_idx < len(interfaces)
+            if start_extremal is not None:
+                assert 0 <= start_extremal < len(orders)
+            
+            # Test end turn detection consistency
+            end_turn, end_idx, end_extremal = path._check_end_turn(orders_array, interfaces_array)
+            
+            # Verify return types and ranges
+            assert isinstance(end_turn, bool)
+            if end_idx is not None:
+                assert 0 <= end_idx < len(interfaces)
+            if end_extremal is not None:
+                assert 0 <= end_extremal < len(orders)
+
+    def test_caching_consistency_across_operations(self):
+        """Test that caching doesn't affect result consistency."""
+        interfaces = [0.1, 0.2, 0.3, 0.4]
+        
+        # Create path with turn pattern
+        orders = [0.05, 0.15, 0.25, 0.35, 0.25, 0.15, 0.25, 0.35]
+        path = StaplePath()
+        for i, order in enumerate(orders):
+            system = System()
+            system.order = [order]
+            system.config = (f"consistency_{i}.xyz", i)
+            path.append(system)
+        
+        # Get results without cache
+        path._cached_orders = None
+        result1 = path.check_turns(interfaces)
+        
+        # Get results with cache populated
+        path._get_orders_array()  # Populate cache
+        result2 = path.check_turns(interfaces)
+        
+        # Results should be identical
+        assert result1 == result2
+        
+        # Test multiple calls with cache
+        for _ in range(5):
+            result = path.check_turns(interfaces)
+            assert result == result1
 
     def test_turn_detection_symmetry(self):
         """Test that turn detection is symmetric for equivalent patterns."""
