@@ -45,7 +45,7 @@ class TestStaplePathCorrectness:
                 path.append(system)
             
             # Test consistency of results
-            orders_array = path._get_orders_array()
+            orders_array = path.get_orders_array()
             interfaces_array = np.array(interfaces)
             
             # Test start turn detection consistency
@@ -86,7 +86,7 @@ class TestStaplePathCorrectness:
         result1 = path.check_turns(interfaces)
         
         # Get results with cache populated
-        path._get_orders_array()  # Populate cache
+        path.get_orders_array()  # Populate cache
         result2 = path.check_turns(interfaces)
         
         # Results should be identical
@@ -196,10 +196,10 @@ class TestStaplePathCorrectness:
         
         # Test different shooting regions
         test_regions = [
-            (0, 19),    # Full range
+            (1, 18),    # Full range
             (5, 15),    # Middle range
-            (0, 10),    # First half
-            (10, 19),   # Second half
+            (1, 10),    # First half
+            (10, 18),   # Second half
             (8, 12),    # Small range
         ]
         

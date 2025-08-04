@@ -101,12 +101,12 @@ class TestStaplePathPerformance:
         
         # First call: populates cache
         start_time = time.time()
-        orders_array1 = path._get_orders_array()
+        orders_array1 = path.get_orders_array()
         first_call_time = time.time() - start_time
         
         # Second call: should use cache
         start_time = time.time()
-        orders_array2 = path._get_orders_array()
+        orders_array2 = path.get_orders_array()
         second_call_time = time.time() - start_time
         
         # Verify same array returned
@@ -119,7 +119,7 @@ class TestStaplePathPerformance:
         times = []
         for _ in range(10):
             start_time = time.time()
-            path._get_orders_array()
+            path.get_orders_array()
             times.append(time.time() - start_time)
         
         # All cached calls should be very fast
@@ -136,7 +136,7 @@ class TestStaplePathPerformance:
         add_systems_to_path(path, orders, "vectorized_test")
         
         # Test vectorized turn detection performance
-        orders_array = path._get_orders_array()
+        orders_array = path.get_orders_array()
         interfaces_array = np.array(interfaces)
         
         start_time = time.time()

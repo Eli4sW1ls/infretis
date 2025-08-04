@@ -1844,7 +1844,11 @@ def staple_sh(
 
     trial_path.weight = 1.0
     intf_chk = trial_path.check_interfaces(intfs_pp)
-    pptype = str(intf_chk[0] + intf_chk[2] + intf_chk[1])
+    # Handle None values from check_interfaces - convert to empty string
+    start = intf_chk[0] if intf_chk[0] is not None else ""
+    end = intf_chk[1] if intf_chk[1] is not None else ""
+    middle = intf_chk[2]
+    pptype = str(start + middle + end)
 
     # Deal with the rejections for path properties.
     # Make sure we did not hit the left interface on {0-}

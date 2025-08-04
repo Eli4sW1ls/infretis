@@ -29,7 +29,23 @@ class MockStapleEngine(EngineBase):
     
     def _read_configuration(self, config_file):
         # Mock configuration reading
-        return np.array([[0.0, 0.0, 0.0]]), np.array([[0.1, 0.1, 0.1]]), np.array([1.0, 1.0, 1.0])
+        return np.array([[0.0, 0.0, 0.0]]), np.array([[0.1, 0.1, 0.1]]), np.array([1.0, 1.0, 1.0]), None
+    
+    def _propagate_from(self, name, path, system, ens_set, msg_file, reverse=False):
+        """Mock _propagate_from method."""
+        # Add some mock propagation behavior
+        for i in range(3):
+            mock_system = System()
+            mock_system.order = [0.2 + i * 0.1]
+            mock_system.config = (f"prop_frame_{i}.xyz", i)
+            path.append(mock_system)
+        return True, "ACC"
+    
+    def _reverse_velocities(self, filename, outfile):
+        """Mock velocity reversal."""
+        # Just copy the file to simulate reversal
+        import shutil
+        shutil.copy2(filename, outfile)
     
     def propagate_st(self, path, ens_set, system, reverse=False):
         """Mock staple propagation method."""

@@ -1,20 +1,23 @@
 #!/usr/bin/env python3
 """
-Test runner for all staple path functionality tests.
+Organized Staple Test Runner
 
-This script runs comprehensive tests for staple path functionality including:
-- Core StaplePath class functionality
-- TIS staple functions (staple_sh, staple_extender, staple_wf)
-- REPEX staple state functionality
-- Engine integration tests
-- Configuration validation
-- Edge cases and error handling
-- Utility functions and analysis tools
-- Integration tests
-- Performance tests
+This script runs staple path functionality tests organized by category:
+- Core: Basic StaplePath functionality (test/staple/core/)
+- Integration: TIS, REPEX, engines, simulations (test/staple/integration/)  
+- Validation: Edge cases, error handling (test/staple/validation/)
+- All: Run all staple tests
+- Original: Run tests from original locations
 
 Usage:
-    python run_staple_tests.py [--verbose] [--coverage] [--specific TEST_NAME]
+    python run_staple_tests.py [category] [options]
+    
+Examples:
+    python run_staple_tests.py                    # Run all organized tests
+    python run_staple_tests.py core               # Run only core tests
+    python run_staple_tests.py integration        # Run only integration tests
+    python run_staple_tests.py --coverage         # Run with coverage
+    python run_staple_tests.py --original         # Run from original locations
 """
 
 import sys
@@ -24,13 +27,65 @@ import argparse
 from pathlib import Path
 
 # Add the infretis root directory to the Python path
-INFRETIS_ROOT = Path(__file__).parent.parent.parent
+INFRETIS_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(INFRETIS_ROOT))
+
+# Test categories in organized structure
+TEST_CATEGORIES = {
+    "core": {
+        "description": "Core StaplePath functionality and algorithms", 
+        "path": "test/staple/core",
+        "files": [
+            "test_staple_path.py",
+            "test_staple_advanced_turns.py", 
+            "test_staple_integration.py",
+            "test_staple_performance.py"
+        ]
+    },
+    "integration": {
+        "description": "TIS, REPEX, engines, and simulation integration",
+        "path": "test/staple/integration",
+        "files": [
+            "test_repex_staple.py",
+            "test_staple_engines.py", 
+            "test_staple_integration.py",
+            "test_staple_tis.py",
+            "test_staple_endtoend.py",
+            "test_staple_simplified.py"
+        ]
+    },
+    "validation": {
+        "description": "Edge cases, error handling, and validation",
+        "path": "test/staple/validation", 
+        "files": [
+            "test_staple_edge_cases.py",
+            "test_staple_validation.py"
+        ]
+    }
+}
 
 
 def main():
     """Main test runner function."""
-    parser = argparse.ArgumentParser(description="Run staple path functionality tests")
+    parser = argparse.ArgumentParser(
+        description="Run staple path functionality tests by category",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  %(prog)s                    # Run all organized tests
+  %(prog)s core               # Run only core tests
+  %(prog)s integration        # Run only integration tests  
+  %(prog)s validation         # Run only validation tests
+  %(prog)s core integration   # Run core and integration tests
+  %(prog)s --list             # List available categories
+  %(prog)s --specific test/staple/core/test_staple_path.py  # Run specific file
+        """
+    )
+    
+    parser.add_argument("categories", nargs="*", default=[],
+                       help="Test categories to run: core, integration, validation, all")
+    parser.add_argument("--list", action="store_true",
+                       help="List available test categories")
     parser.add_argument("--verbose", "-v", action="store_true", 
                        help="Run tests in verbose mode")
     parser.add_argument("--coverage", action="store_true",
@@ -44,7 +99,23 @@ def main():
     parser.add_argument("--parallel", "-n", type=int, default=1,
                        help="Number of parallel test processes (requires pytest-xdist)")
     
+    # Check for --list before parsing to avoid argument validation
+    if "--list" in sys.argv:
+        print_categories()
+        return 0
+    
     args = parser.parse_args()
+    
+    # If no categories specified and not using --specific, default to all
+    if not args.categories and not args.specific:
+        args.categories = ["all"]
+    
+    # Validate categories
+    valid_categories = list(TEST_CATEGORIES.keys()) + ["all"]
+    for cat in args.categories:
+        if cat not in valid_categories:
+            print(f"Error: Invalid category '{cat}'. Valid categories: {', '.join(valid_categories)}")
+            return 1
     
     # Base pytest arguments
     pytest_args = []
@@ -59,226 +130,92 @@ def main():
             "--cov=infretis.classes.staple_path",
             "--cov=infretis.classes.repex_staple", 
             "--cov=infretis.core.tis",
-            "--cov-report=html",
+            "--cov-report=html:htmlcov",
             "--cov-report=term-missing"
         ])
     
-    # Specific test selection
+    # Determine which tests to run
     if args.specific:
         pytest_args.append(args.specific)
     else:
-        # Run all staple-related tests
-        test_files = [
-            "test/core/test_staple_path.py",
-            "test/core/test_staple_edge_cases.py", 
-            "test/core/test_staple_utilities.py",
-            "test/tis/test_staple_tis.py",
-            "test/repex/test_repex_staple.py",
-            "test/engines/test_staple_engines.py",
-            "test/simulations/test_staple_integration.py"
-        ]
+        # Use organized structure
+        categories = args.categories if args.categories else ["all"]
+        if "all" in categories:
+            categories = list(TEST_CATEGORIES.keys())
         
-        # Filter to only existing files
-        existing_files = []
-        for test_file in test_files:
-            full_path = INFRETIS_ROOT / test_file
-            if full_path.exists():
-                existing_files.append(str(full_path))
-            else:
-                print(f"Warning: Test file not found: {test_file}")
-        
-        pytest_args.extend(existing_files)
+        test_files = get_category_files(categories)
+        pytest_args.extend(test_files)
+        print(f"📁 Running organized tests for: {', '.join(categories)} ({len(test_files)} files)")
     
-    # Markers
+    # Additional options
     if args.markers:
         pytest_args.extend(["-m", args.markers])
-    
-    # Failed tests only
     if args.failed:
         pytest_args.append("--lf")
-    
-    # Parallel execution
     if args.parallel > 1:
         pytest_args.extend(["-n", str(args.parallel)])
     
-    # Additional useful pytest options
+    # Useful pytest options
     pytest_args.extend([
-        "--tb=short",           # Shorter traceback format
-        "--strict-markers",     # Require markers to be defined
-        "--disable-warnings",   # Disable warnings for cleaner output
+        "--tb=short",
+        "--disable-warnings",
     ])
     
     print("=" * 60)
-    print("Running Staple Path Functionality Tests")
+    print("🧪 Running Staple Path Tests")
     print("=" * 60)
-    print(f"Test arguments: {' '.join(pytest_args)}")
-    print()
     
     # Run the tests
     exit_code = pytest.main(pytest_args)
     
-    print()
-    print("=" * 60)
+    print("\n" + "=" * 60)
     if exit_code == 0:
-        print("All staple tests PASSED! ✅")
+        print("✅ All staple tests PASSED!")
     else:
-        print("Some staple tests FAILED! ❌")
+        print("❌ Some staple tests FAILED!")
     print("=" * 60)
     
     return exit_code
 
 
-def check_dependencies():
-    """Check if required test dependencies are available."""
-    required_packages = [
-        "pytest",
-        "numpy", 
-        "unittest.mock"
-    ]
+def print_categories():
+    """Print available test categories."""
+    print("\n📋 Available Test Categories:")
+    print("=" * 50)
     
-    optional_packages = [
-        ("pytest-cov", "coverage reporting"),
-        ("pytest-xdist", "parallel test execution"),
-        ("pytest-html", "HTML test reports")
-    ]
-    
-    missing_required = []
-    missing_optional = []
-    
-    for package in required_packages:
-        try:
-            __import__(package.replace("-", "_"))
-        except ImportError:
-            missing_required.append(package)
-    
-    for package, description in optional_packages:
-        try:
-            __import__(package.replace("-", "_"))
-        except ImportError:
-            missing_optional.append((package, description))
-    
-    if missing_required:
-        print("Error: Missing required packages:")
-        for package in missing_required:
-            print(f"  - {package}")
-        print("\nInstall with: pip install " + " ".join(missing_required))
-        return False
-    
-    if missing_optional:
-        print("Optional packages not found (features will be limited):")
-        for package, description in missing_optional:
-            print(f"  - {package}: {description}")
-        print()
-    
-    return True
+    for category, info in TEST_CATEGORIES.items():
+        path = INFRETIS_ROOT / info["path"]
+        file_count = len(info["files"])
+        existing_count = len([f for f in info["files"] if (path / f).exists()])
+        
+        status = "✅" if existing_count == file_count else "⚠️"
+        print(f"\n{status} {category.upper()}")
+        print(f"   Description: {info['description']}")
+        print(f"   Location: {info['path']}")
+        print(f"   Files: {existing_count}/{file_count} available")
 
 
-def create_test_report():
-    """Create a summary test report."""
-    report_content = """
-# Staple Path Test Coverage Report
-
-This report covers the testing of staple path functionality in infRETIS:
-
-## Test Categories
-
-### 1. Core StaplePath Class Tests (`test_staple_path.py`)
-- ✅ Path initialization and basic properties
-- ✅ Turn detection (start, end, overall)
-- ✅ Shooting point selection
-- ✅ Path copying and equality
-- ✅ PP path extraction
-- ✅ Path pasting functionality
-
-### 2. TIS Staple Functions Tests (`test_staple_tis.py`)
-- ✅ `staple_sh()` function testing
-- ✅ `staple_extender()` function testing  
-- ✅ `staple_wf()` function testing
-- ✅ Error handling and edge cases
-
-### 3. REPEX Staple State Tests (`test_repex_staple.py`)
-- ✅ REPEX_state_staple initialization
-- ✅ Path addition and management
-- ✅ Probability matrix handling
-- ✅ Integration with ensemble configuration
-
-### 4. Engine Integration Tests (`test_staple_engines.py`)
-- ✅ Engine-specific staple propagation
-- ✅ Custom stopping conditions
-- ✅ Error handling in engines
-- ✅ Performance with large paths
-
-### 5. Edge Cases and Error Handling (`test_staple_edge_cases.py`)
-- ✅ Configuration validation
-- ✅ Empty and single-point paths
-- ✅ Extreme parameter values
-- ✅ NaN and infinity handling
-- ✅ Boundary conditions
-
-### 6. Utility Functions (`test_staple_utilities.py`)
-- ✅ Path analysis tools
-- ✅ Statistical calculations
-- ✅ Interface crossing analysis
-- ✅ Path quality metrics
-
-### 7. Integration Tests (`test_staple_integration.py`)
-- ✅ Complete workflow testing
-- ✅ Multi-component integration
-- ✅ Performance under load
-- ✅ Memory efficiency
-
-## Running Tests
-
-```bash
-# Run all staple tests
-python run_staple_tests.py
-
-# Run with coverage
-python run_staple_tests.py --coverage
-
-# Run specific test file
-python run_staple_tests.py --specific test/core/test_staple_path.py
-
-# Run in verbose mode
-python run_staple_tests.py --verbose
-
-# Run failed tests only
-python run_staple_tests.py --failed
-```
-
-## Test Statistics
-
-- **Total test files**: 7
-- **Estimated test count**: 100+ individual tests
-- **Coverage areas**: Core classes, TIS functions, engines, configuration, edge cases
-- **Test types**: Unit tests, integration tests, performance tests, error handling
-
-## Notes
-
-- Tests use mocking to avoid dependencies on external MD engines
-- Performance tests are designed to run quickly while testing scalability
-- Edge case tests ensure robustness with unusual inputs
-- Integration tests verify complete workflows work correctly
-"""
-    
-    report_file = INFRETIS_ROOT / "test" / "STAPLE_TEST_REPORT.md"
-    with open(report_file, "w") as f:
-        f.write(report_content)
-    
-    print(f"Test report created: {report_file}")
+def get_category_files(categories):
+    """Get test files for specified categories."""
+    all_files = []
+    for category in categories:
+        if category in TEST_CATEGORIES:
+            category_info = TEST_CATEGORIES[category]
+            category_path = INFRETIS_ROOT / category_info["path"]
+            
+            for file_name in category_info["files"]:
+                full_path = category_path / file_name
+                if full_path.exists():
+                    all_files.append(str(full_path))
+                else:
+                    print(f"Warning: Test file not found: {category_info['path']}/{file_name}")
+        else:
+            print(f"Warning: Unknown category: {category}")
+    return all_files
 
 
 if __name__ == "__main__":
-    print("Staple Path Test Suite")
+    print("🧪 Staple Path Test Suite")
     print("=" * 40)
-    
-    # Check dependencies
-    if not check_dependencies():
-        sys.exit(1)
-    
-    # Create test report
-    create_test_report()
-    
-    # Run tests
     exit_code = main()
     sys.exit(exit_code)

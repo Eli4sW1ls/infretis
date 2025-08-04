@@ -199,7 +199,7 @@ class REPEX_state_staple(REPEX_state):
                         "weights": out_traj.weights,
                         "adress": out_traj.adress,
                         "ens_save_idx": ens_save_idx,
-                        "ptype": str(chk_intf[0] + chk_intf[2] + chk_intf[1])
+                        "ptype": str((chk_intf[0] if chk_intf[0] is not None else "") + chk_intf[2] + (chk_intf[1] if chk_intf[1] is not None else "")),
                     }
                 else:
                     st, end, valid = out_traj.check_turns(self.interfaces)
@@ -207,7 +207,7 @@ class REPEX_state_staple(REPEX_state):
                         logger.warning(
                             "Path does not have valid turns, cannot load staple path."
                         )
-                        raise ValueError("Path does not have valid turns.")
+                        raise ValueError(f"Path does not have valid turns. {st}, {end}, {out_traj.get_orders_array()}")
                     if (out_traj.sh_region is None or len(out_traj.sh_region) != 2 or 
                         out_traj.ptype is None or len(out_traj.ptype) < 3):
                         _, pptype, sh_region = out_traj.get_pp_path(self.interfaces, self.ensembles[ens_num + 1]['interfaces'])
@@ -215,6 +215,7 @@ class REPEX_state_staple(REPEX_state):
                         # print(f"read st properties from traj {out_traj.path_number}: {out_traj.ordermin}-{out_traj.ordermax}, {out_traj.ptype}, {out_traj.sh_region}, {[php.order[0] for php in out_traj.phasepoints[out_traj.sh_region[0]-1:out_traj.sh_region[0]+8] + out_traj.phasepoints[out_traj.sh_region[1]-8:out_traj.sh_region[1]+2]]}") # noqa: E501
                         pptype = out_traj.ptype
                         sh_region = out_traj.sh_region
+                        print(f"pptype: {pptype}, sh_region: {sh_region}")
                     self.traj_data[traj_num] = {
                         "ens_save_idx": ens_save_idx,
                         "max_op": out_traj.ordermax,
@@ -306,7 +307,7 @@ class REPEX_state_staple(REPEX_state):
                 raise ValueError("Path does not have valid turns.")
             if size <= 3:
                 chk_intf = paths[i+1].check_interfaces(self.ensembles[i + 1]['interfaces'])
-                pptype = str(chk_intf[0] + chk_intf[2] + chk_intf[1])
+                pptype = str((chk_intf[0] if chk_intf[0] is not None else "") + chk_intf[2] + (chk_intf[1] if chk_intf[1] is not None else ""))
                 sh_region = (1, len(paths[i+1].phasepoints)-1)
             else:
                 _, pptype, sh_region = paths[i+1].get_pp_path(interfaces, [interfaces[max(i-1, 0)], interfaces[i], interfaces[i+1]])
@@ -356,7 +357,7 @@ class REPEX_state_staple(REPEX_state):
             "weights": paths[0].weights,
             "adress": paths[0].adress,
             "frac": np.array(frac, dtype="longdouble"),
-            "ptype": str(chk_intf0[0] + chk_intf0[2] + chk_intf0[1]),
+            "ptype": str((chk_intf0[0] if chk_intf0[0] is not None else "") + chk_intf0[2] + (chk_intf0[1] if chk_intf0[1] is not None else "")),
             "sh_region": (1, len(paths[0].phasepoints) - 1)
         }
 

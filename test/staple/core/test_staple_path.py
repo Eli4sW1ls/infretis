@@ -77,7 +77,7 @@ class TestStaplePath:
         assert path._path_version == len(orders)
         
         # Get orders array (should populate cache)
-        orders_array = path._get_orders_array()
+        orders_array = path.get_orders_array()
         assert isinstance(orders_array, np.ndarray)
         assert len(orders_array) == len(orders)
         assert np.array_equal(orders_array, orders)
@@ -87,7 +87,7 @@ class TestStaplePath:
         assert path._cached_orders_version == path._path_version
         
         # Getting orders again should return same cached array
-        orders_array2 = path._get_orders_array()
+        orders_array2 = path.get_orders_array()
         assert orders_array is orders_array2  # Same object reference
         
         # Adding another point should invalidate cache
@@ -112,7 +112,7 @@ class TestStaplePath:
             path.append(system)
         
         # Populate cache
-        orders_array = path._get_orders_array()
+        orders_array = path.get_orders_array()
         initial_version = path._cached_orders_version
         
         # Test various modification operations
@@ -124,7 +124,7 @@ class TestStaplePath:
         
         for operation in operations:
             # Ensure cache is populated
-            path._get_orders_array()
+            path.get_orders_array()
             assert path._cached_orders is not None
             
             # Perform operation that should invalidate cache
@@ -147,7 +147,7 @@ class TestStaplePath:
             system.config = (f"turn_test_{i}.xyz", i)
             path.append(system)
         
-        orders_array = path._get_orders_array()
+        orders_array = path.get_orders_array()
         interfaces_array = np.array(interfaces)
         
         # Test optimized start turn detection
@@ -1378,13 +1378,13 @@ class TestStapleRegression:
         assert hasattr(staple_path, 'check_turns')
         assert hasattr(staple_path, '_check_start_turn')  # Private method
         assert hasattr(staple_path, '_check_end_turn')   # Private method
-        assert hasattr(staple_path, '_get_orders_array')  # Caching method
+        assert hasattr(staple_path, 'get_orders_array')  # Caching method
         
         # Regular Path should not have these methods
         assert not hasattr(regular_path, 'check_turns')
         assert not hasattr(regular_path, '_check_start_turn')
         assert not hasattr(regular_path, '_check_end_turn')
-        assert not hasattr(regular_path, '_get_orders_array')
+        assert not hasattr(regular_path, 'get_orders_array')
         
         # Test that StaplePath methods can be called
         start_info, end_info, valid = staple_path.check_turns(interfaces)

@@ -554,7 +554,7 @@ class TestStaplePathWarningHandling:
         path = StaplePath()
         
         # Test empty path
-        assert path._get_orders_array().size == 0
+        assert path.get_orders_array().size == 0
         assert path._cached_orders is not None
         assert len(path._cached_orders) == 0
         
@@ -564,7 +564,7 @@ class TestStaplePathWarningHandling:
         system.config = ("single.xyz", 0)
         path.append(system)
         
-        orders = path._get_orders_array()
+        orders = path.get_orders_array()
         assert len(orders) == 1
         assert orders[0] == 0.5
         

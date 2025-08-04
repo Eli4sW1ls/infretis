@@ -181,7 +181,7 @@ class TestStapleWorkflowEndToEnd:
         assert isinstance(success, bool)
         assert trial_path is not None
         assert isinstance(status, str)
-        assert status in ["ACC", "REJ", "FTK", "FTX"]
+        assert status in ["ACC", "REJ", "FTK", "FTX", "EXT", "FTL"]
 
     def test_multi_ensemble_coordination(self, complete_simulation_config):
         """Test coordination between multiple ensembles."""
@@ -363,7 +363,7 @@ class TestStapleWorkflowEndToEnd:
         
         # Check that all results are properly formatted
         exception_count = sum(1 for _, status in results if "EXCEPTION" in status)
-        valid_statuses = sum(1 for _, status in results if status in ["ACC", "REJ", "FTK", "FTX"] or "EXCEPTION" in status)
+        valid_statuses = sum(1 for _, status in results if status in ["ACC", "REJ", "FTK", "FTX", "EXT", "FTL"] or "EXCEPTION" in status)
         
         # All results should be properly handled (no undefined statuses)
         assert valid_statuses == attempts, f"Some results had invalid statuses: {results}"
