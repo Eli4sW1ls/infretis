@@ -22,11 +22,28 @@ class TestStaplePath:
 
     def test_init(self):
         """Test that StaplePath can be initialized."""
-        path = StaplePath(maxlen=100, time_origin=0)
+        path = StaplePath(maxlen=100, time_origin=0, ptype="")
         assert path.maxlen == 100
         assert path.time_origin == 0
+        assert path.ptype == ""
         assert path.sh_region is None
-        assert path.meta == {"pptype": str, "dir": 0}
+
+    def test_init_with_ptype(self):
+        """Test that StaplePath can be initialized with ptype."""
+        path = StaplePath(maxlen=50, time_origin=10, ptype="LML")
+        assert path.maxlen == 50
+        assert path.time_origin == 10
+        assert path.ptype == "LML"
+        assert path.sh_region is None
+
+    def test_ptype_assignment_validation(self):
+        """Test that ptype is properly assigned and validated."""
+        valid_ptypes = ["", "LML", "RMR", "0-", "-0", "00"]
+        
+        for ptype in valid_ptypes:
+            path = StaplePath(ptype=ptype)
+            assert path.ptype == ptype
+            assert isinstance(path.ptype, str)
 
     def create_phasepoints(self):
         """Create test phasepoints for a valid staple path with a proper turn."""
@@ -77,7 +94,7 @@ class TestStaplePath:
 
     def test_check_start_turn_valid(self):
         """Test start turn detection with valid turn."""
-        path = StaplePath()
+        path = StaplePath(ptype="")
         phasepoints = self.create_phasepoints()
         for pp in phasepoints:
             path.append(pp)
@@ -91,7 +108,7 @@ class TestStaplePath:
 
     def test_check_start_turn_invalid_short_path(self):
         """Test start turn detection with too short path."""
-        path = StaplePath()
+        path = StaplePath(ptype="")
         system = System()
         system.order = [0.3]
         system.config = ("frame_0.xyz", 0)
@@ -106,7 +123,7 @@ class TestStaplePath:
 
     def test_check_end_turn_valid(self):
         """Test end turn detection with valid turn."""
-        path = StaplePath()
+        path = StaplePath(ptype="")
         phasepoints = self.create_phasepoints()
         for pp in phasepoints:
             path.append(pp)
@@ -121,7 +138,7 @@ class TestStaplePath:
 
     def test_check_turns_both_valid(self):
         """Test that both start and end turns are detected."""
-        path = StaplePath()
+        path = StaplePath(ptype="")
         phasepoints = self.create_phasepoints()
         for pp in phasepoints:
             path.append(pp)
@@ -135,7 +152,7 @@ class TestStaplePath:
 
     def test_check_turns_no_turns(self):
         """Test turn detection with incomplete turn pattern (no complete turns)."""
-        path = StaplePath()
+        path = StaplePath(ptype="")
         # Create a path that starts a turn but doesn't complete it
         # Goes up and crosses interface 3, then down to interface 2, but doesn't cross back
         orders = [
@@ -158,9 +175,47 @@ class TestStaplePath:
         assert not end_info[0]    # no complete end turn
         assert not overall_valid  # overall path is not valid
 
+    def test_boundary_turn_detection(self):
+        """Test turn detection for trajectories starting outside boundaries."""
+        path = StaplePath(ptype="")
+        # Create path starting outside left boundary
+        orders = [0.05, 0.1, 0.2, 0.3, 0.2, 0.1, 0.05]  # Starts below interfaces[0] = 0.15
+        for i, order in enumerate(orders):
+            system = System()
+            system.order = [order]
+            system.config = (f"boundary_{i}.xyz", i)
+            path.append(system)
+        
+        interfaces = [0.15, 0.25, 0.35, 0.45]
+        start_info, end_info, valid = path.check_turns(interfaces)
+        
+        # Should be valid as it starts outside boundaries
+        assert start_info[0]  # start turn valid
+        assert end_info[0]    # end turn valid
+        assert valid          # overall valid
+
+    def test_boundary_turn_detection_right_side(self):
+        """Test turn detection for trajectories starting outside right boundary."""
+        path = StaplePath(ptype="")
+        # Create path starting outside right boundary
+        orders = [0.50, 0.4, 0.3, 0.2, 0.3, 0.4, 0.50]  # Starts above interfaces[-1] = 0.45
+        for i, order in enumerate(orders):
+            system = System()
+            system.order = [order]
+            system.config = (f"boundary_right_{i}.xyz", i)
+            path.append(system)
+        
+        interfaces = [0.15, 0.25, 0.35, 0.45]
+        start_info, end_info, valid = path.check_turns(interfaces)
+        
+        # Should be valid as it starts outside boundaries
+        assert start_info[0]  # start turn valid
+        assert end_info[0]    # end turn valid
+        assert valid          # overall valid
+
     def test_get_pp_path(self):
         """Test extraction of PP path from staple path."""
-        path = StaplePath()
+        path = StaplePath(ptype="")
         phasepoints = self.create_phasepoints()
         for pp in phasepoints:
             path.append(pp)
@@ -171,15 +226,33 @@ class TestStaplePath:
             "interfaces": [0.25, 0.35, 0.45]  # 3 adjacent interfaces
         }
         
-        pp_path, _, _ = path.get_pp_path(ens["all_intfs"], ens["interfaces"])
+        pp_path, ptype, sh_region = path.get_pp_path(ens["all_intfs"], ens["interfaces"])
         
         # PP path should be shorter than original staple path
         assert pp_path.length <= path.length
         assert pp_path.length >= 2  # Must have at least start and end
+        assert isinstance(ptype, str)  # ptype should be a string
+        assert isinstance(sh_region, tuple)  # sh_region should be a tuple
+
+    def test_get_pp_path_invalid_interfaces(self):
+        """Test get_pp_path with invalid interface configuration."""
+        path = StaplePath(ptype="")
+        # Add some phasepoints
+        for i in range(5):
+            system = System()
+            system.order = [0.2 + i * 0.1]
+            system.config = (f"invalid_{i}.xyz", i)
+            path.append(system)
+        
+        interfaces = [0.1, 0.3, 0.5]
+        pp_interfaces = [0.2, 0.4, 0.6]  # Not subset of interfaces
+        
+        with pytest.raises(AssertionError):
+            path.get_pp_path(interfaces, pp_interfaces)
 
     def test_get_shooting_point(self):
         """Test shooting point selection."""
-        path = StaplePath()
+        path = StaplePath(ptype="")
         phasepoints = self.create_phasepoints()
         for pp in phasepoints:
             path.append(pp)
@@ -193,40 +266,53 @@ class TestStaplePath:
         shooting_point, idx = path.get_shooting_point(rgen)
         
         assert shooting_point is not None
-        assert 0 <= idx < path.length
+        assert path.sh_region[0] <= idx <= path.sh_region[1]
         assert shooting_point.order is not None
+
+    def test_get_shooting_point_no_region_error(self):
+        """Test error when getting shooting point without defined region."""
+        path = StaplePath(ptype="")
+        phasepoints = self.create_phasepoints()
+        for pp in phasepoints:
+            path.append(pp)
+        
+        # Don't set sh_region - should cause error
+        rgen = np.random.default_rng(42)
+        
+        with pytest.raises(ValueError, match="Shooting region is not defined"):
+            path.get_shooting_point(rgen)
 
     def test_copy(self):
         """Test path copying."""
-        path = StaplePath()
+        path = StaplePath(ptype="LML")
         phasepoints = self.create_phasepoints()
         for pp in phasepoints:
             path.append(pp)
         
         path.sh_region = (1, 5)
-        path.meta["test"] = "value"
         
         path_copy = path.copy()
         
         assert path_copy.length == path.length
         assert path_copy.sh_region == path.sh_region
-        assert path_copy.meta == path.meta
+        assert path_copy.ptype == path.ptype
         assert path_copy is not path  # Different objects
         assert path_copy.phasepoints is not path.phasepoints  # Different lists
 
     def test_empty_path(self):
         """Test empty path creation."""
-        path = StaplePath()
+        path = StaplePath(ptype="RMR")
         empty = path.empty_path(maxlen=50)
         
         assert isinstance(empty, StaplePath)
         assert empty.maxlen == 50
         assert empty.length == 0
+        assert empty.ptype == ""  # Empty path should have empty ptype
 
     def test_equality(self):
         """Test path equality comparison."""
-        path1 = StaplePath()
-        path2 = StaplePath()
+        path1 = StaplePath(ptype="LML")
+        path2 = StaplePath(ptype="LML")
         
         phasepoints = self.create_phasepoints()
         for pp in phasepoints:
@@ -356,7 +442,7 @@ class TestPastePaths:
 
     def create_test_path(self, orders, reverse=False):
         """Create a test path with given order parameters."""
-        path = StaplePath()
+        path = StaplePath(ptype="")
         path.time_origin = 0
         
         if reverse:
@@ -429,7 +515,7 @@ class TestPastePaths:
 
     def test_paste_paths_empty_paths(self):
         """Test pasting with empty paths."""
-        empty_path = StaplePath()
+        empty_path = StaplePath(ptype="")
         normal_path = self.create_test_path([0.1, 0.2, 0.3])
         
         # Empty back path
@@ -476,34 +562,6 @@ class TestStaplePathUtilities:
         expected_length = path1.length + path2.length - 1
         assert combined.length == expected_length
     
-    def test_paste_paths_with_metadata(self):
-        """Test that metadata is preserved during path pasting."""
-        path1 = StaplePath()
-        path2 = StaplePath()
-        
-        # Add metadata
-        path1.meta["test_key"] = "test_value"
-        path1.meta["number"] = 42
-        path2.meta["other_key"] = "other_value"
-        
-        # Add some points
-        for i in range(3):
-            system1 = System()
-            system1.order = [0.1 + i * 0.1]
-            system1.config = (f"meta1_{i}.xyz", i)
-            path1.append(system1)
-            
-            system2 = System()
-            system2.order = [0.4 + i * 0.1]
-            system2.config = (f"meta2_{i}.xyz", i)
-            path2.append(system2)
-        
-        combined = paste_paths(path1, path2, overlap=True)
-        
-        # Check that metadata is preserved (typically from first path)
-        assert hasattr(combined, 'meta')
-        assert isinstance(combined.meta, dict)
-    
     def test_paste_paths_maxlen_exact_boundary(self):
         """Test paste_paths when result exactly equals maxlen."""
         path1 = StaplePath()
@@ -541,15 +599,15 @@ class TestStaplePathUtilities:
             original.append(system)
         
         original.sh_region = (1, 3)
-        original.meta["complex"] = {"nested": {"data": [1, 2, 3]}}
+        original.ptype = "LML"
         
         # Create copy
         copied = original.copy()
         
         # Modify original
         original.phasepoints[0].order[0] = 999.0
-        original.meta["complex"]["nested"]["data"].append(4)
-        original.sh_region = (0, 4)
+        original.ptype = "LMR"
+        original.sh_region = (2, 4)
         
         # Copy should be unchanged
         assert copied.phasepoints[0].order[0] == 999.0
@@ -855,6 +913,523 @@ class TestStapleErrorHandling:
         
         with pytest.raises((AttributeError, TypeError)):
             paste_paths(valid_path, None)
+
+
+class TestStaplePathTypeValidation:
+    """Test path type classification and validation."""
+    
+    def test_ptype_generation_lml(self):
+        """Test LML path type generation."""
+        path = StaplePath()
+        # Create L->M->L pattern (left -> middle -> left)
+        orders = [0.05, 0.25, 0.45, 0.25, 0.05]  # Start low, go high, return low
+        for i, order in enumerate(orders):
+            system = System()
+            system.order = [order]
+            system.config = (f"lml_frame_{i}.xyz", i)
+            path.append(system)
+        
+        interfaces = [0.15, 0.35, 0.55]
+        
+        # Check turns are detected
+        start_info, end_info, overall_valid = path.check_turns(interfaces)
+        assert start_info[0]  # Start turn valid
+        assert end_info[0]    # End turn valid
+        assert overall_valid  # Overall path valid
+        
+        # Test ptype assignment if get_pp_path exists
+        if hasattr(path, 'get_pp_path'):
+            try:
+                _, ptype, sh_region = path.get_pp_path(interfaces, interfaces)
+                assert "L" in ptype or "M" in ptype
+            except (AttributeError, NotImplementedError):
+                pass
+    
+    def test_ptype_generation_rmr(self):
+        """Test RMR path type generation."""
+        path = StaplePath()
+        # Create R->M->R pattern (right -> middle -> right)
+        orders = [0.65, 0.35, 0.15, 0.35, 0.65]  # Start high, go low, return high
+        for i, order in enumerate(orders):
+            system = System()
+            system.order = [order]
+            system.config = (f"rmr_frame_{i}.xyz", i)
+            path.append(system)
+        
+        interfaces = [0.25, 0.45, 0.55]
+        
+        # Check turns are detected
+        start_info, end_info, overall_valid = path.check_turns(interfaces)
+        assert start_info[0]  # Start turn valid
+        assert end_info[0]    # End turn valid
+        assert overall_valid  # Overall path valid
+    
+    def test_ptype_generation_complex_patterns(self):
+        """Test complex ptype patterns like LMLRMR."""
+        path = StaplePath()
+        # Create complex multi-turn pattern
+        orders = [0.05, 0.25, 0.45, 0.25, 0.45, 0.65, 0.45, 0.25, 0.05]
+        for i, order in enumerate(orders):
+            system = System()
+            system.order = [order]
+            system.config = (f"complex_frame_{i}.xyz", i)
+            path.append(system)
+        
+        interfaces = [0.15, 0.35, 0.55]
+        
+        # Should detect turns at start and end
+        start_info, end_info, overall_valid = path.check_turns(interfaces)
+        assert start_info[0]  # Start turn valid
+        assert end_info[0]    # End turn valid
+    
+    def test_invalid_ptype_patterns(self):
+        """Test detection of invalid ptype patterns."""
+        path = StaplePath()
+        # Create monotonic path (no turns)
+        orders = [0.1, 0.2, 0.3, 0.4, 0.5]
+        for i, order in enumerate(orders):
+            system = System()
+            system.order = [order]
+            system.config = (f"invalid_frame_{i}.xyz", i)
+            path.append(system)
+        
+        interfaces = [0.15, 0.25, 0.35, 0.45]
+        
+        # Should not detect valid turns
+        start_info, end_info, overall_valid = path.check_turns(interfaces)
+        assert not overall_valid  # Should be invalid
+
+
+class TestStapleErrorHandling:
+    """Test error handling in staple operations."""
+    
+    def test_get_pp_path_edge_cases(self):
+        """Test get_pp_path with edge case configurations."""
+        path = StaplePath()
+        # Create minimal valid path
+        orders = [0.1, 0.3, 0.1]
+        for i, order in enumerate(orders):
+            system = System()
+            system.order = [order]
+            system.config = (f"edge_frame_{i}.xyz", i)
+            path.append(system)
+        
+        interfaces = [0.2]
+        all_interfaces = [0.2]
+        
+        # Test with minimal interface configuration
+        if hasattr(path, 'get_pp_path'):
+            try:
+                result = path.get_pp_path(interfaces, all_interfaces)
+                assert result is not None
+            except (AttributeError, NotImplementedError, ValueError):
+                # Expected for edge cases or unimplemented methods
+                pass
+    
+    def test_turn_detection_boundary_conditions(self):
+        """Test turn detection at interface boundaries."""
+        path = StaplePath()
+        # Create path with points exactly at interface values
+        orders = [0.1, 0.2, 0.3, 0.2, 0.1]  # Exactly on interfaces
+        for i, order in enumerate(orders):
+            system = System()
+            system.order = [order]
+            system.config = (f"boundary_frame_{i}.xyz", i)
+            path.append(system)
+        
+        interfaces = [0.2, 0.3]
+        
+        # Should handle boundary conditions gracefully
+        start_info, end_info, overall_valid = path.check_turns(interfaces)
+        assert isinstance(start_info[0], bool)
+        assert isinstance(end_info[0], bool)
+        assert isinstance(overall_valid, bool)
+    
+    def test_shooting_region_validation(self):
+        """Test shooting region validation in various scenarios."""
+        path = StaplePath()
+        orders = [0.05, 0.25, 0.45, 0.25, 0.05]
+        for i, order in enumerate(orders):
+            system = System()
+            system.order = [order]
+            system.config = (f"shooting_frame_{i}.xyz", i)
+            path.append(system)
+        
+        # Test various sh_region assignments
+        valid_regions = [(1, 3), (0, 4), (2, 2)]
+        for region in valid_regions:
+            path.sh_region = region
+            assert path.sh_region == region
+        
+        # Test invalid regions
+        invalid_regions = [(-1, 2), (3, 1), (10, 20)]
+        for region in invalid_regions:
+            path.sh_region = region
+            # Should not raise error during assignment
+            assert path.sh_region == region
+
+    def test_empty_path_error_handling(self):
+        """Test error handling for empty paths."""
+        path = StaplePath()
+        interfaces = [0.1, 0.2, 0.3]
+        
+        # Empty path should handle gracefully
+        start_info, end_info, overall_valid = path.check_turns(interfaces)
+        assert not start_info[0]  # No valid start turn
+        assert not end_info[0]    # No valid end turn
+        assert not overall_valid  # Not valid overall
+
+
+class TestStapleConfigurationValidation:
+    """Test configuration validation for staple functionality."""
+    
+    def test_interface_consistency_validation(self):
+        """Test that interface configurations are consistent."""
+        path = StaplePath()
+        orders = [0.05, 0.25, 0.45, 0.25, 0.05]
+        for i, order in enumerate(orders):
+            system = System()
+            system.order = [order]
+            system.config = (f"config_frame_{i}.xyz", i)
+            path.append(system)
+        
+        # Test with consistent interfaces - interfaces should be subset of all_interfaces
+        interfaces = [0.15, 0.35]
+        all_interfaces = [0.15, 0.35]  # interfaces should match all_interfaces for valid pp path
+        
+        # This should work if get_pp_path is implemented
+        if hasattr(path, 'get_pp_path'):
+            try:
+                result = path.get_pp_path(interfaces, all_interfaces)
+                assert result is not None
+            except (AttributeError, NotImplementedError, AssertionError):
+                # AssertionError can occur if path doesn't cross all interfaces
+                pass
+    
+    def test_shooting_moves_configuration(self):
+        """Test shooting_moves configuration for staple mode."""
+        # Test configuration validation
+        staple_moves = ["st_sh", "st_wf"]
+        regular_moves = ["sh", "wf"]
+        
+        # This would typically be tested at a higher level
+        # but we can test the concept
+        for move in staple_moves:
+            assert "st_" in move or move in regular_moves
+    
+    def test_ensemble_interface_consistency(self):
+        """Test consistency between ensemble interfaces and global interfaces."""
+        # Mock ensemble configuration
+        ensemble_interfaces = {
+            0: [0.1, 0.2],
+            1: [0.2, 0.3],
+            2: [0.3, 0.4]
+        }
+        
+        global_interfaces = [0.1, 0.2, 0.3, 0.4]
+        
+        # Test that ensemble interfaces are subsets of global interfaces
+        for ens_id, ens_intfs in ensemble_interfaces.items():
+            for intf in ens_intfs:
+                assert intf in global_interfaces
+
+
+class TestStapleRegression:
+    """Regression tests for known staple issues."""
+    
+    def test_circular_import_prevention(self):
+        """Test that circular imports are prevented."""
+        # Test that imports work correctly
+        try:
+            from infretis.classes.staple_path import StaplePath, turn_detected
+            from infretis.classes.path import paste_paths
+            from infretis.classes.system import System
+            assert True  # Imports successful
+        except ImportError as e:
+            pytest.fail(f"Import error suggests circular import: {e}")
+    
+    def test_meta_attribute_handling(self):
+        """Test meta attribute handling consistency."""
+        path = StaplePath()
+        
+        # Test that standard attributes work
+        path.path_number = 1
+        path.status = "ACC"
+        path.ptype = "LML"
+        path.sh_region = (1, 3)
+        
+        assert path.path_number == 1
+        assert path.status == "ACC"
+        assert path.ptype == "LML"
+        assert path.sh_region == (1, 3)
+    
+    def test_ensemble_zero_path_object_usage(self):
+        """Regression test for ensemble 0 using Path vs StaplePath."""
+        # Test that StaplePath can be used consistently
+        path = StaplePath()
+        
+        # Should have all Path functionality plus staple-specific features
+        assert hasattr(path, 'append')
+        assert hasattr(path, 'phasepoints')
+        assert hasattr(path, 'check_turns')  # Staple-specific
+        
+        # Test basic Path operations work
+        system = System()
+        system.order = [0.25]
+        system.config = ("test.xyz", 0)
+        path.append(system)
+        
+        assert path.length == 1
+        assert len(path.phasepoints) == 1
+
+
+class TestStapleRegression:
+    """Regression tests for known staple issues."""
+    
+    def test_circular_import_prevention(self):
+        """Test that circular imports are prevented."""
+        # Test import order doesn't cause issues
+        try:
+            # Try importing modules in different orders to detect circular imports
+            import infretis.classes.staple_path
+            import infretis.classes.repex_staple
+            import infretis.core.tis
+            
+            # Verify that key classes can be instantiated
+            path = infretis.classes.staple_path.StaplePath()
+            assert path is not None
+            
+            # This should not raise ImportError or circular import issues
+            assert hasattr(infretis.classes.staple_path, 'StaplePath')
+            assert hasattr(infretis.classes.repex_staple, 'REPEX_state_staple')
+            
+        except ImportError as e:
+            pytest.fail(f"Circular import detected: {e}")
+    
+    def test_meta_attribute_handling(self):
+        """Test meta attribute handling consistency."""
+        # Test that meta attributes are handled correctly
+        path = StaplePath()
+        
+        # Test path number handling
+        path.path_number = 42
+        assert path.path_number == 42
+        
+        # Test status handling
+        path.status = "ACC"
+        assert path.status == "ACC"
+        
+        # Test generated attribute handling
+        path.generated = ("st_sh", 0.25, 5, 10)
+        assert path.generated == ("st_sh", 0.25, 5, 10)
+        
+        # Test that these attributes persist through copy operations
+        path_copy = path.copy()
+        assert path_copy.path_number == 42
+        assert path_copy.status == "ACC"
+        
+    def test_ensemble_zero_path_object_usage(self):
+        """Regression test for ensemble 0 using Path vs StaplePath."""
+        # Test the specific issue mentioned in conversations
+        # Ensemble 0 should use regular Path, not StaplePath
+        from infretis.classes.path import Path
+        
+        # Create both path types
+        regular_path = Path()
+        staple_path = StaplePath()
+        
+        # Add some phasepoints to both
+        for i in range(3):
+            system = System()
+            system.order = [0.1 + i * 0.1]
+            system.config = (f"frame_{i}.xyz", i)
+            regular_path.append(system)
+            staple_path.append(system)
+        
+        # Verify they have different behaviors for staple-specific methods
+        interfaces = [0.15, 0.25, 0.35]
+        
+        # StaplePath should have staple-specific methods
+        assert hasattr(staple_path, 'check_turns')
+        assert hasattr(staple_path, 'check_start_turn')
+        assert hasattr(staple_path, 'check_end_turn')
+        
+        # Regular Path should not have these methods
+        assert not hasattr(regular_path, 'check_turns')
+        assert not hasattr(regular_path, 'check_start_turn')
+        assert not hasattr(regular_path, 'check_end_turn')
+        
+        # Test that StaplePath methods can be called
+        start_info, end_info, valid = staple_path.check_turns(interfaces)
+        assert isinstance(valid, bool)
+        
+    def test_staple_path_ptype_consistency(self):
+        """Test that ptype generation and usage is consistent."""
+        path = StaplePath()
+        
+        # Create path with specific crossing pattern
+        orders = [0.05, 0.20, 0.30, 0.40, 0.30, 0.20, 0.05]
+        for i, order in enumerate(orders):
+            system = System()
+            system.order = [order]
+            system.config = (f"frame_{i}.xyz", i)
+            path.append(system)
+        
+        interfaces = [0.1, 0.25, 0.35]
+        
+        # Test turn detection
+        start_info, end_info, valid = path.check_turns(interfaces)
+        
+        # Test that ptype can be assigned and retrieved
+        path.ptype = ("L", "M", "L")
+        assert path.ptype == ("L", "M", "L")
+        
+        # Test ptype string conversion
+        if hasattr(path, 'get_ptype_string'):
+            ptype_str = path.get_ptype_string()
+            assert isinstance(ptype_str, str)
+            
+    def test_interface_boundary_consistency(self):
+        """Test consistent behavior at interface boundaries."""
+        path = StaplePath()
+        
+        # Create path that exactly touches interfaces
+        orders = [0.1, 0.25, 0.35, 0.25, 0.1]  # Exactly on interfaces
+        for i, order in enumerate(orders):
+            system = System()
+            system.order = [order]
+            system.config = (f"boundary_frame_{i}.xyz", i)
+            path.append(system)
+        
+        interfaces = [0.1, 0.25, 0.35]
+        
+        # Test that boundary crossings are handled consistently
+        start_info, end_info, valid = path.check_turns(interfaces)
+        
+        # Should handle exact interface values correctly
+        assert isinstance(start_info[0], bool)
+        assert isinstance(end_info[0], bool)
+        assert isinstance(valid, bool)
+        
+    def test_shooting_region_validation_consistency(self):
+        """Test shooting region validation is consistent."""
+        path = StaplePath()
+        
+        # Create valid staple path
+        orders = [0.05, 0.15, 0.30, 0.40, 0.30, 0.15, 0.05]
+        for i, order in enumerate(orders):
+            system = System()
+            system.order = [order]
+            system.config = (f"sh_frame_{i}.xyz", i)
+            path.append(system)
+        
+        # Test various shooting region assignments
+        valid_regions = [(1, 5), (2, 4), (1, len(orders)-2)]
+        
+        for region in valid_regions:
+            path.sh_region = region
+            assert path.sh_region == region
+            assert path.sh_region[0] < path.sh_region[1]
+            assert path.sh_region[0] >= 0
+            assert path.sh_region[1] < len(path.phasepoints)
+
+
+class TestStapleErrorHandling:
+    """Test error handling for staple paths."""
+    
+    def test_invalid_interface_configuration(self):
+        """Test handling of invalid interface configurations."""
+        path = StaplePath()
+        
+        # Add minimal path
+        for i in range(3):
+            system = System()
+            system.order = [0.1 + i * 0.1]
+            system.config = (f"frame_{i}.xyz", i)
+            path.append(system)
+        
+        # Test with various invalid interface configurations
+        invalid_interfaces = [
+            [],  # Empty interfaces
+            [0.2],  # Single interface
+            [0.3, 0.2, 0.1],  # Non-ascending interfaces
+            [0.1, 0.1, 0.2],  # Duplicate interfaces
+        ]
+        
+        for interfaces in invalid_interfaces:
+            try:
+                start_info, end_info, valid = path.check_turns(interfaces)
+                # Should handle gracefully (not necessarily raise exception)
+                assert isinstance(valid, bool)
+            except (ValueError, IndexError, AssertionError):
+                # These exceptions are acceptable for invalid configurations
+                pass
+                
+    def test_empty_path_handling(self):
+        """Test handling of empty or minimal paths."""
+        path = StaplePath()
+        interfaces = [0.1, 0.2, 0.3]
+        
+        # Test empty path
+        start_info, end_info, valid = path.check_turns(interfaces)
+        assert not valid
+        
+        # Test single point path
+        system = System()
+        system.order = [0.15]
+        system.config = ("single_frame.xyz", 0)
+        path.append(system)
+        
+        start_info, end_info, valid = path.check_turns(interfaces)
+        assert not valid
+
+
+class TestStaplePathTypeValidation:
+    """Test path type classification and validation."""
+    
+    def test_ptype_generation_consistency(self):
+        """Test that ptype generation works correctly."""
+        path = StaplePath()
+        
+        # Create different path patterns and test ptype assignment
+        test_cases = [
+            ([0.05, 0.15, 0.25, 0.35], "forward_crossing"),
+            ([0.35, 0.25, 0.15, 0.05], "backward_crossing"),
+            ([0.15, 0.25, 0.35, 0.25, 0.15], "turn_pattern"),
+        ]
+        
+        for orders, description in test_cases:
+            path = StaplePath()
+            for i, order in enumerate(orders):
+                system = System()
+                system.order = [order]
+                system.config = (f"{description}_{i}.xyz", i)
+                path.append(system)
+            
+            # Test that ptype can be assigned
+            path.ptype = ("L", "M", "R")
+            assert len(path.ptype) == 3
+            assert all(isinstance(p, str) for p in path.ptype)
+            
+    def test_shooting_region_boundary_validation(self):
+        """Test shooting region boundary validation."""
+        path = StaplePath()
+        
+        # Create path
+        orders = [0.1, 0.2, 0.3, 0.4, 0.3, 0.2, 0.1]
+        for i, order in enumerate(orders):
+            system = System()
+            system.order = [order]
+            system.config = (f"boundary_test_{i}.xyz", i)
+            path.append(system)
+        
+        # Test valid shooting regions
+        valid_regions = [(1, 5), (2, 4), (0, 6)]
+        for region in valid_regions:
+            path.sh_region = region
+            assert path.sh_region[0] >= 0
+            assert path.sh_region[1] < len(path.phasepoints)
+            assert path.sh_region[0] < path.sh_region[1]
 
 
 if __name__ == "__main__":

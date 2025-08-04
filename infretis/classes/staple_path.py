@@ -301,6 +301,7 @@ class StaplePath(Path):
             new_path.weights = self.weights
 
             if len(intfs) <= 3:
+                pptype = ""  # Default value for pptype
                 if self.phasepoints[0].order[0] < pp_intfs[0]:
                     if self.phasepoints[-1].order[0] < pp_intfs[0]:
                         pptype = "LML"
@@ -311,6 +312,9 @@ class StaplePath(Path):
                         pptype = "RMR"
                     else:
                         pptype = "RML"
+                else:
+                    # Path doesn't match expected valid patterns
+                    raise ValueError("Path does not start from a valid boundary state")
                 for phasep in self.phasepoints:
                     new_path.append(phasep.copy())
                 return new_path, pptype, (1, len(self.phasepoints) - 2)
