@@ -162,7 +162,7 @@ class StaplePath(Path):
         if start_op <= intfs_min:
             return True, 0, 0
         elif start_op >= intfs_max:
-            return True, len(interfaces) - 1, 0
+            return True, int(len(interfaces) - 1), 0
         
         # Find movement direction
         next_val = orders[1]
@@ -171,18 +171,18 @@ class StaplePath(Path):
         # Vectorized interface crossing detection
         if start_increasing:
             # Find first interface crossed
-            crossed_mask = (start_op < interfaces) & (interfaces <= next_val)
+            crossed_mask = (start_op <= interfaces) & (interfaces < next_val)
         else:
-            crossed_mask = (next_val <= interfaces) & (interfaces < start_op)
+            crossed_mask = (next_val < interfaces) & (interfaces <= start_op)
         
         if not np.any(crossed_mask):
             return False, None, None
         
         initial_interface_idx = np.where(crossed_mask)[0]
         if start_increasing:
-            initial_interface_idx = initial_interface_idx[0]
+            initial_interface_idx = int(initial_interface_idx[0])
         else:
-            initial_interface_idx = initial_interface_idx[-1]
+            initial_interface_idx = int(initial_interface_idx[-1])
         
         initial_interface = interfaces[initial_interface_idx]
         
@@ -206,11 +206,11 @@ class StaplePath(Path):
             if recrossed:
                 # Vectorized interface counting
                 min_val, max_val = min(start_op, max_deviation), max(start_op, max_deviation)
-                interfaces_crossed = np.sum((interfaces > min_val) & (interfaces < max_val))
+                interfaces_crossed = np.sum((interfaces >= min_val) & (interfaces < max_val))
                 
                 if interfaces_crossed >= 2:
                     turn_interface_idx = initial_interface_idx + 1 if start_increasing else initial_interface_idx - 1
-                    return True, turn_interface_idx, extremal_idx
+                    return True, int(turn_interface_idx), int(extremal_idx)
         
         return False, None, None
     
@@ -241,9 +241,9 @@ class StaplePath(Path):
         
         # Check boundary conditions first
         if end_op >= intfs_max:
-            return True, len(interfaces) - 1, len(orders) - 1
+            return True, int(len(interfaces) - 1), int(len(orders) - 1)
         elif end_op <= intfs_min:
-            return True, 0, len(orders) - 1
+            return True, 0, int(len(orders) - 1)
         
         # Similar logic as start turn but scanning backwards
         prev_val = orders[-2]
@@ -258,6 +258,15 @@ class StaplePath(Path):
         if not np.any(crossed_mask):
             return False, None, None
         
+        # Find the initial interface that was crossed (similar to start_turn)
+        initial_interface_idx = np.where(crossed_mask)[0]
+        if end_increasing:
+            initial_interface_idx = int(initial_interface_idx[0])  
+        else:
+            initial_interface_idx = int(initial_interface_idx[-1])
+        
+        initial_interface = interfaces[initial_interface_idx]
+
         # Similar extremal detection logic but backwards
         max_deviation = end_op
         extremal_idx = len(orders) - 1
@@ -265,18 +274,23 @@ class StaplePath(Path):
         # Simplified backwards scan - could be further optimized with vectorization
         for idx in range(len(orders) - 2, -1, -1):
             current_val = orders[idx]
-            
+
             if ((end_increasing and current_val > max_deviation) or 
                 (not end_increasing and current_val < max_deviation)):
                 max_deviation = current_val
                 extremal_idx = idx
-        
-        # Interface crossing check (same as original logic)
-        min_val, max_val = min(end_op, max_deviation), max(end_op, max_deviation)
-        interfaces_crossed = np.sum((interfaces > min_val) & (interfaces < max_val))
-        
-        if interfaces_crossed >= 2:
-            return True, 0, extremal_idx  # Simplified return
+
+            # Check recrossing
+            recrossed = ((end_increasing and current_val <= initial_interface < max_deviation) or 
+                          (not end_increasing and current_val >= initial_interface > max_deviation))
+            if recrossed:
+            # Vectorized interface counting
+                min_val, max_val = min(end_op, max_deviation), max(end_op, max_deviation)
+                interfaces_crossed = np.sum((interfaces >= min_val) & (interfaces < max_val))
+                
+                if interfaces_crossed >= 2:
+                    turn_interface_idx = initial_interface_idx - 1 if end_increasing else initial_interface_idx + 1
+                    return True, int(turn_interface_idx), int(extremal_idx)
         
         return False, None, None
 
@@ -568,7 +582,7 @@ def turn_detected(orders: np.ndarray, interfaces: List[float], m_idx: int, lr: i
         ops_elig = orders[extr_idx:]
         
         # Vectorized comparison for turn detection
-        return np.any(lr * ops_elig <= lr * cond_intf)
+        return bool(np.any(lr * ops_elig <= lr * cond_intf))
 
 def load_staple_path(pdir: str, lamb_A: float) -> StaplePath:
     """Load a path from the given directory."""
