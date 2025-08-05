@@ -25,16 +25,6 @@ if TYPE_CHECKING:  # pragma: no cover
 logger = logging.getLogger(__name__)
 logger.addHandler(logging.NullHandler())
 
-# Lazy import for profiling to avoid circular imports
-def get_profiling_context():
-    """Get profiling context if available."""
-    try:
-        from infretis.profiling import profile_operation
-        return profile_operation
-    except ImportError:
-        from contextlib import nullcontext
-        return lambda *args, **kwargs: nullcontext()
-
 
 class StaplePath(Path):
     """Path class that supports turns and restricted shooting point selection."""
@@ -99,39 +89,37 @@ class StaplePath(Path):
               - extremal_idx (Optional[int]): Index in phasepoints list where the extremal value occurs
             - overall_valid (bool): Whether the overall path is valid (both turns valid and non-overlapping)
         """
-        profile_op = get_profiling_context()
         
-        with profile_op("staple_check_turns", path_length=self.length, num_interfaces=len(interfaces)):
-            if self.length < 1 or interfaces is None or len(interfaces) == 0:
-                return (False, None, None), (False, None, None), False
+        if self.length < 1 or interfaces is None or len(interfaces) == 0:
+            return (False, None, None), (False, None, None), False
+        
+        # Get orders as numpy array for vectorized operations
+        orders = self.get_orders_array()
+        interfaces_arr = np.array(interfaces)
+        
+        # Check individual turns using vectorized operations
+        start_turn, start_interface_idx, start_extremal_idx = self._check_start_turn(
+            orders, interfaces_arr
+        )
+        end_turn, end_interface_idx, end_extremal_idx = self._check_end_turn(
+            orders, interfaces_arr
+        )
+        
+        # Validate overall path (same logic as original)
+        valid = start_turn and end_turn
+        if valid and start_extremal_idx is not None and end_extremal_idx is not None:
+            intfs_min, intfs_max = np.min(interfaces_arr), np.max(interfaces_arr)
+            start_op, end_op = orders[0], orders[-1]
             
-            # Get orders as numpy array for vectorized operations
-            orders = self.get_orders_array()
-            interfaces_arr = np.array(interfaces)
+            both_min = (start_op <= intfs_min and end_op <= intfs_min)
+            both_max = (start_op >= intfs_max and end_op >= intfs_max)
             
-            # Check individual turns using vectorized operations
-            start_turn, start_interface_idx, start_extremal_idx = self._check_start_turn(
-                orders, interfaces_arr
-            )
-            end_turn, end_interface_idx, end_extremal_idx = self._check_end_turn(
-                orders, interfaces_arr
-            )
-            
-            # Validate overall path (same logic as original)
-            valid = start_turn and end_turn
-            if valid and start_extremal_idx is not None and end_extremal_idx is not None:
-                intfs_min, intfs_max = np.min(interfaces_arr), np.max(interfaces_arr)
-                start_op, end_op = orders[0], orders[-1]
-                
-                both_min = (start_op <= intfs_min and end_op <= intfs_min)
-                both_max = (start_op >= intfs_max and end_op >= intfs_max)
-                
-                if not (both_min or both_max):
-                    valid = not (start_interface_idx == end_interface_idx and 
-                               start_extremal_idx == end_extremal_idx)
-            
-            return (start_turn, start_interface_idx, start_extremal_idx), \
-               (end_turn, end_interface_idx, end_extremal_idx), valid
+            if not (both_min or both_max):
+                valid = not (start_interface_idx == end_interface_idx and 
+                           start_extremal_idx == end_extremal_idx)
+        
+        return (start_turn, start_interface_idx, start_extremal_idx), \
+           (end_turn, end_interface_idx, end_extremal_idx), valid
     
     def _check_start_turn(self, orders: np.ndarray, interfaces: np.ndarray) -> Tuple[bool, Optional[int], Optional[int]]:
         """Check if the start of the path forms a valid turn.
@@ -231,7 +219,7 @@ class StaplePath(Path):
             - turn_interface_idx (int): Index of the interface around which the turn occurs
               (the interface that gets recrossed to complete the turn), -1 if no valid turn
             - extremal_idx (int): Index in phasepoints list where the extremal value 
-              (maximum deviation from end) occurs, length-1 if no valid turn
+              (maximum deviation from end) occurs, None if no valid turn
         """
         if len(orders) < 2:
             return False, None, None
@@ -289,80 +277,76 @@ class StaplePath(Path):
                 interfaces_crossed = np.sum((interfaces >= min_val) & (interfaces < max_val))
                 
                 if interfaces_crossed >= 2:
-                    turn_interface_idx = initial_interface_idx - 1 if end_increasing else initial_interface_idx + 1
+                    turn_interface_idx = initial_interface_idx + 1 if end_increasing else initial_interface_idx - 1
                     return True, int(turn_interface_idx), int(extremal_idx)
         
         return False, None, None
 
     def get_shooting_point(self, rgen) -> Tuple[System, int]:
         """Shooting point selection with bounds checking."""
-        profile_op = get_profiling_context()
         
-        with profile_op("staple_shooting_point_selection", path_length=self.length):
-            if self.sh_region is None:
-                logger.warning("No shooting region defined, cannot select a shooting point.")
-                raise ValueError("Shooting region is not defined.")
-                
-            # Pre-validate bounds
-            start, end = self.sh_region
-            if start > end or start <= 0 or end >= self.length-1:
-                logger.error(f"Invalid shooting region: {self.sh_region} for path length {self.length}")
-                raise ValueError(f"Invalid shooting region: {self.sh_region} for path length {self.length}")
-                
-            # Fast integer selection
-            idx = rgen.integers(start, end, endpoint=True)
-            logger.debug(f"Selected point with orderp {self.phasepoints[idx].order[0]}")
-            return self.phasepoints[idx], idx
+        if self.sh_region is None:
+            logger.warning("No shooting region defined, cannot select a shooting point.")
+            raise ValueError("Shooting region is not defined.")
+            
+        # Pre-validate bounds
+        start, end = self.sh_region
+        if start > end or start <= 0 or end >= self.length-1:
+            logger.error(f"Invalid shooting region: {self.sh_region} for path length {self.length}")
+            raise ValueError(f"Invalid shooting region: {self.sh_region} for path length {self.length}")
+            
+        # Fast integer selection
+        idx = rgen.integers(start, end, endpoint=True)
+        logger.debug(f"Selected point with orderp {self.phasepoints[idx].order[0]}")
+        return self.phasepoints[idx], idx
 
     def get_pp_path(self, intfs: List[float], pp_intfs: List[float]) -> Tuple[Path, str, Tuple[int, int]]:
         """Optimized path extraction with reduced complexity."""
         from infretis.classes.path import Path
         
-        profile_op = get_profiling_context()
+        # Early validation
+        if len(pp_intfs) <= 1:
+            return None, "", (0, 0)
+            
+        # Validate that pp_intfs is a subset of intfs
+        assert str(list(dict.fromkeys(pp_intfs)))[1:-1] in str(intfs)[1:-1], f"Invalid interface indices: {intfs, pp_intfs, str(list(dict.fromkeys(pp_intfs)))[1:-1], str(intfs)[1:-1]}"
+            
+        new_path = Path(maxlen=self.maxlen, time_origin=self.time_origin)
+        interfaces = np.array(intfs)
         
-        with profile_op("staple_path_extraction", path_length=self.length, 
-                       num_interfaces=len(intfs), num_pp_interfaces=len(pp_intfs)):
-            # Early validation
-            if len(pp_intfs) <= 1:
-                return None, "", (0, 0)
-                
-            # Validate that pp_intfs is a subset of intfs
-            assert str(list(dict.fromkeys(pp_intfs)))[1:-1] in str(intfs)[1:-1], f"Invalid interface indices: {intfs, pp_intfs, str(list(dict.fromkeys(pp_intfs)))[1:-1], str(intfs)[1:-1]}"
-                
-            new_path = Path(maxlen=self.maxlen, time_origin=self.time_origin)
-            interfaces = np.array(intfs)
+        # Use cached turn information if available
+        if self._cached_turn_info is None:
+            start_info, end_info, valid = self.check_turns(interfaces)
+            self._cached_turn_info = (start_info, end_info, valid)
+        else:
+            start_info, end_info, valid = self._cached_turn_info
             
-            # Use cached turn information if available
-            if self._cached_turn_info is None:
-                start_info, end_info, valid = self.check_turns(interfaces)
-                self._cached_turn_info = (start_info, end_info, valid)
-            else:
-                start_info, end_info, valid = self._cached_turn_info
-                
-            if not valid:
-                return None, "", (0, 0)
-                
-            # Simplified path extraction for common cases
-            if len(intfs) <= 3:
-                # Simple three-interface case
-                pptype = self._determine_simple_pptype(pp_intfs)
-                for phasep in self.phasepoints:
-                    new_path.append(phasep.copy())
-                return new_path, pptype, (1, len(self.phasepoints) - 2)
+        if not valid:
+            return None, "", (0, 0)
             
-            # For complex cases, use optimized border detection
+        # Simplified path extraction for common cases
+        if len(intfs) <= 3:
+            # Simple three-interface case
+            pptype = self._determine_simple_pptype(pp_intfs)
+            for phasep in self.phasepoints:
+                new_path.append(phasep.copy())
+            return new_path, pptype, (1, len(self.phasepoints) - 2)
+        
+        # For complex cases, use optimized border detection
         left_border, right_border, pptype = self._find_borders(
             start_info, end_info, pp_intfs)
             
         # Validate path segment
         valid_pp = self._validate_pp_segment(left_border, right_border, pp_intfs)
         if not valid_pp:
+            print("Validation failed! Cannot extract path segment.", self.ordermax)
             return None, "", (0, 0)
             
         # Copy path segment efficiently
         for phasep in self.phasepoints[left_border-1:right_border+2]:
             new_path.append(phasep.copy())
-            
+
+        print(f"{self.path_number}, pptype: {pptype}, sh_region: {left_border, right_border}")
         return new_path, pptype, (left_border, right_border)
     
     def _determine_simple_pptype(self, pp_intfs: List[float]) -> str:
@@ -380,13 +364,43 @@ class StaplePath(Path):
     def _find_borders(self, start_info, end_info, pp_intfs) -> Tuple[int, int, str]:
         """Optimized border detection using vectorized operations."""
         # Extract orders as array for vectorized operations
-        orders = np.array([php.order[0] for php in self.phasepoints])
+        orders = self.get_orders_array()
         
         # Determine path type and borders based on extremal positions
         start_extremal = start_info[2]
         end_extremal = end_info[2]
+
+        if pp_intfs[0] == pp_intfs[1]:
+            # Handle degenerate case where pp_intfs[0] == pp_intfs[1] (e.g., [-0.1, -0.1, 0.0])
+            # This typically occurs for ensemble [0+] where the path stays near the boundary
+            
+            # Check if the path actually crosses the target interface pp_intfs[2]
+            max_order = np.max(orders)
+            min_order = np.min(orders)
+            
+            # If path doesn't cross pp_intfs[2], it's a boundary path
+            if ((pp_intfs[2] > pp_intfs[0] and max_order < pp_intfs[2]) or 
+                (pp_intfs[2] < pp_intfs[0] and min_order > pp_intfs[2])):
+                # Path stays on one side of pp_intfs[2], assign simple pptype
+                if orders[0] < pp_intfs[2] and orders[-1] < pp_intfs[2]:
+                    pptype = "LML"  # Stays on left side
+                else:
+                    pptype = "RMR"  # Stays on right side
+                left_border = 1
+                right_border = len(orders) - 2
+            elif start_extremal == 0:
+                left_border = 1
+                right_border = next(i for i in range(start_extremal + 1, len(orders)) if orders[i] >= pp_intfs[2])-1
+                pptype = "LML" if right_border == len(orders) - 2 else "LMR"
+            elif end_extremal == len(orders) - 1:
+                left_border = next(i for i in range(end_extremal - 1, -1, -1) if orders[i] >= pp_intfs[2]) + 1
+                right_border = len(orders) - 2
+                pptype = "LML" if left_border == 1 else "RML"
+            else:
+                raise ValueError("Invalid extremal indices for ensemble [0*].")
+            
         
-        if pp_intfs[1] < orders[end_extremal] < pp_intfs[2]:  # LML end
+        elif pp_intfs[1] < orders[end_extremal] < pp_intfs[2]:  # LML end
             left_border = self._find_border_vectorized(orders, start_extremal, pp_intfs[0], 'left')
             right_border = len(orders) - 2
             pptype = "LML"
@@ -403,7 +417,7 @@ class StaplePath(Path):
             right_border = len(orders) - 2
             pptype = "RMR"
         else:
-            valid_indices = np.where((orders > pp_intfs[0]) & (orders < pp_intfs[2]))[0]
+            valid_indices = [idx for idx in np.where((orders > pp_intfs[0]) & (orders < pp_intfs[2]))[0] if start_info[2] <= idx <= end_info[2]]
             if len(valid_indices) == 0:
                 raise ValueError("No valid segment found")
             left_border = valid_indices[0]
@@ -433,7 +447,10 @@ class StaplePath(Path):
         """Validate that the path segment crosses the middle interface."""
         if left_border >= right_border:
             return False
-            
+        
+        if pp_intfs[0] == pp_intfs[1]:
+            return self.phasepoints[0].order[0] <= pp_intfs[1] < self.phasepoints[1].order[0] or \
+                   self.phasepoints[-1].order[0] <= pp_intfs[1] < self.phasepoints[-2].order[0]
         # Check for interface crossing in the segment
         for p in range(left_border, right_border):
             if p >= len(self.phasepoints) - 1:
@@ -449,21 +466,19 @@ class StaplePath(Path):
 
     def copy(self) -> Path:
         """Return a copy of this path."""
-        profile_op = get_profiling_context()
         
-        with profile_op("staple_path_copy", path_length=self.length):
-            new_path = self.empty_path(maxlen=self.maxlen)
-            for phasepoint in self.phasepoints:
-                new_path.append(phasepoint.copy())
-            new_path.status = self.status
-            new_path.time_origin = self.time_origin
-            new_path.generated = self.generated
-            new_path.maxlen = self.maxlen
-            new_path.path_number = self.path_number
-            new_path.weights = self.weights
-            new_path.sh_region = self.sh_region
-            new_path.ptype = self.ptype
-            return new_path
+        new_path = self.empty_path(maxlen=self.maxlen)
+        for phasepoint in self.phasepoints:
+            new_path.append(phasepoint.copy())
+        new_path.status = self.status
+        new_path.time_origin = self.time_origin
+        new_path.generated = self.generated
+        new_path.maxlen = self.maxlen
+        new_path.path_number = self.path_number
+        new_path.weights = self.weights
+        new_path.sh_region = self.sh_region
+        new_path.ptype = self.ptype
+        return new_path
     
     def empty_path(self, maxlen=DEFAULT_MAXLEN, **kwargs) -> StaplePath:
         """Return an empty path of same class as the current one."""
@@ -537,8 +552,6 @@ def turn_detected(orders: np.ndarray, interfaces: List[float], m_idx: int, lr: i
     Returns:
         True if a turn is detected, False otherwise.
     """
-    profile_op = get_profiling_context()
-    
     # Input validation - raise error for invalid inputs
     if not isinstance(orders, np.ndarray) or not interfaces or lr is None:
         logger.warning("Invalid input for turn detection.")
@@ -546,43 +559,42 @@ def turn_detected(orders: np.ndarray, interfaces: List[float], m_idx: int, lr: i
     
     if len(orders) < 3:  # Need at least 3 points for a meaningful turn
         return False
-        
-    with profile_op("staple_turn_detected", path_length=len(orders), num_interfaces=len(interfaces)):
-        # Check for invalid interface index
-        if m_idx >= len(interfaces) or m_idx < 0:
-            return False
+    
+    # Check for invalid interface index
+    if m_idx >= len(interfaces) or m_idx < 0:
+        return False
 
-        # Convert to numpy array for vectorized operations
-        interfaces_arr = np.array(interfaces)
-        start_op = orders[0]
-        end_op = orders[-1]
+    # Convert to numpy array for vectorized operations
+    interfaces_arr = np.array(interfaces)
+    start_op = orders[0]
+    end_op = orders[-1]
 
-        # Check if already outside interface boundaries - vectorized comparison
-        if start_op <= interfaces_arr[0] or end_op >= interfaces_arr[-1] or lr * end_op <= lr * interfaces_arr[m_idx]:
-            return True
+    # Check if already outside interface boundaries - vectorized comparison
+    if start_op <= interfaces_arr[0] or end_op >= interfaces_arr[-1] or lr * end_op <= lr * interfaces_arr[m_idx]:
+        return True
+    
+    # Find extreme value using vectorized operations
+    extr_op = np.max(orders) if lr == 1 else np.min(orders)
+    extr_idx = np.argmax(orders) if lr == 1 else np.argmin(orders)
+    
+    # Find eligible interfaces using vectorized comparison
+    elig_mask = lr * interfaces_arr <= lr * extr_op
+    elig_intfs = interfaces_arr[elig_mask]
+    
+    if len(elig_intfs) < 2:
+        return False
         
-        # Find extreme value using vectorized operations
-        extr_op = np.max(orders) if lr == 1 else np.min(orders)
-        extr_idx = np.argmax(orders) if lr == 1 else np.argmin(orders)
-        
-        # Find eligible interfaces using vectorized comparison
-        elig_mask = lr * interfaces_arr <= lr * extr_op
-        elig_intfs = interfaces_arr[elig_mask]
-        
-        if len(elig_intfs) < 2:
-            return False
-            
-        cond_intf = elig_intfs[1] if lr == -1 else elig_intfs[-2]
-        
-        # If we're still at the extreme point, no turn detected
-        if extr_idx == len(orders) - 1:
-            return False
+    cond_intf = elig_intfs[1] if lr == -1 else elig_intfs[-2]
+    
+    # If we're still at the extreme point, no turn detected
+    if extr_idx == len(orders) - 1:
+        return False
 
-        # Check points after the extreme point using array slicing
-        ops_elig = orders[extr_idx:]
-        
-        # Vectorized comparison for turn detection
-        return bool(np.any(lr * ops_elig <= lr * cond_intf))
+    # Check points after the extreme point using array slicing
+    ops_elig = orders[extr_idx:]
+    
+    # Vectorized comparison for turn detection
+    return bool(np.any(lr * ops_elig <= lr * cond_intf))
 
 def load_staple_path(pdir: str, lamb_A: float) -> StaplePath:
     """Load a path from the given directory."""

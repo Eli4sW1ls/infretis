@@ -215,7 +215,7 @@ class REPEX_state_staple(REPEX_state):
                         # print(f"read st properties from traj {out_traj.path_number}: {out_traj.ordermin}-{out_traj.ordermax}, {out_traj.ptype}, {out_traj.sh_region}, {[php.order[0] for php in out_traj.phasepoints[out_traj.sh_region[0]-1:out_traj.sh_region[0]+8] + out_traj.phasepoints[out_traj.sh_region[1]-8:out_traj.sh_region[1]+2]]}") # noqa: E501
                         pptype = out_traj.ptype
                         sh_region = out_traj.sh_region
-                        print(f"pptype: {pptype}, sh_region: {sh_region}")
+                    # print(f"{out_traj.path_number}, pptype: {pptype}, sh_region: {sh_region}")
                     self.traj_data[traj_num] = {
                         "ens_save_idx": ens_save_idx,
                         "max_op": out_traj.ordermax,

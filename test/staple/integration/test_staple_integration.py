@@ -440,7 +440,7 @@ class TestStapleWorkflowIntegration:
         """Create a complete staple path for integration testing."""
         path = StaplePath()
         # Create path with proper start and end turns
-        orders = [0.05, 0.15, 0.25, 0.35, 0.45, 0.35, 0.25, 0.15, 0.05]
+        orders = [0.05, 0.15, 0.25, 0.35, 0.37, 0.35, 0.25, 0.15]
         for i, order in enumerate(orders):
             system = System()
             system.order = [order]
@@ -501,7 +501,7 @@ class TestStapleWorkflowIntegration:
         assert expected_keys.issubset(state.traj_data.keys())
         for i in range(3):
             assert i in state.traj_data
-            assert state.traj_data[i]["length"] == 9  # Number of phasepoints
+            assert state.traj_data[i]["length"] == 8  # Number of phasepoints
 
     def test_staple_path_persistence(self):
         """Test that staple paths maintain properties through REPEX cycle."""
@@ -569,7 +569,8 @@ class TestStapleWorkflowIntegration:
         state.ensembles = {
             0: {"interfaces": (float("-inf"), 0.1, 0.1)},
             1: {"interfaces": (0.1, 0.1, 0.2)},
-            2: {"interfaces": (0.1, 0.2, 0.3)}
+            2: {"interfaces": (0.1, 0.2, 0.3)},
+            3: {"interfaces": (0.2, 0.3, 0.4)}
         }
         
         # Load all paths
