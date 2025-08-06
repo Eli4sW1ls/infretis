@@ -339,7 +339,7 @@ class StaplePath(Path):
         # Validate path segment
         valid_pp = self._validate_pp_segment(left_border, right_border, pp_intfs)
         if not valid_pp:
-            print("Validation failed! Cannot extract path segment.", self.ordermax)
+            print("Validation failed! Cannot extract path segment.", self.ordermax, pp_intfs)
             return None, "", (0, 0)
             
         # Copy path segment efficiently
@@ -388,11 +388,11 @@ class StaplePath(Path):
                     pptype = "RMR"  # Stays on right side
                 left_border = 1
                 right_border = len(orders) - 2
-            elif start_extremal == 0:
+            elif start_info[1] == 0:
                 left_border = 1
                 right_border = next(i for i in range(start_extremal + 1, len(orders)) if orders[i] >= pp_intfs[2])-1
                 pptype = "LML" if right_border == len(orders) - 2 else "LMR"
-            elif end_extremal == len(orders) - 1:
+            elif end_info[1] == 0:
                 left_border = next(i for i in range(end_extremal - 1, -1, -1) if orders[i] >= pp_intfs[2]) + 1
                 right_border = len(orders) - 2
                 pptype = "LML" if left_border == 1 else "RML"
