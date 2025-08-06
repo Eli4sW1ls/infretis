@@ -463,6 +463,62 @@ class StaplePath(Path):
                 return True
                 
         return False
+    
+    def update_energies(
+        self,
+        ekin: Union[np.ndarray, List[float]],
+        vpot: Union[np.ndarray, List[float]],
+    ) -> None:
+        """Update the energies for the phase points.
+
+        This method is useful in cases where the energies are
+        read from external engines and returned as a list of
+        floats.
+
+        Args:
+            ekin : The kinetic energies to set.
+            vpot : The potential energies to set.
+        """
+        start = 0
+        if len(ekin) != len(vpot):
+            logger.debug(
+                "Kinetic and potential energies have different length."
+            )
+        if len(ekin) != len(self.phasepoints):
+            logger.debug(
+                "Length of kinetic energy and phase points differ %d != %d.",
+                len(ekin),
+                len(self.phasepoints),
+            )
+        if len(vpot) != len(self.phasepoints):
+            logger.debug(
+                "Length of potential energy and phase points differ %d != %d.",
+                len(vpot),
+                len(self.phasepoints),
+            )
+        if len(ekin) == len(vpot) == len(self.phasepoints) - 1:
+            logger.debug(
+                "Kinetic and potential energies have length %d, but phase points have length %d. "
+                "Assuming last phase point is the first point of a turn segment.",
+                len(ekin),
+                len(self.phasepoints),
+            )
+            start = 1  # Skip first phase point if energies are one less than phasepoints
+        for i, phasepoint in enumerate(self.phasepoints[start:]):
+            try:
+                vpoti = vpot[i]
+            except IndexError:
+                logger.warning(
+                    "Ran out of potential energies, setting to None."
+                )
+                vpoti = None
+            try:
+                ekini = ekin[i]
+            except IndexError:
+                logger.warning("Ran out of kinetic energies, setting to None.")
+                ekini = None
+            phasepoint.vpot = vpoti
+            phasepoint.ekin = ekini
 
     def copy(self) -> Path:
         """Return a copy of this path."""

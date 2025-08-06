@@ -2229,6 +2229,14 @@ def staple_swap_zero(
         )
     return accept, [path0, path1], status
 
+def staple_swap(
+    picked: dict[int, Any],
+    engines: dict[int, list[EngineBase]],
+) -> tuple[bool, list[InfPath], str]:
+    """Is this needed?"""
+    pass
+
+
 def staple_extender(
     source_seg: InfPath,
     partial_path_type: Tuple[str, ...],
