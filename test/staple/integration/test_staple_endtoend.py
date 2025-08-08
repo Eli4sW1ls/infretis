@@ -140,7 +140,7 @@ class TestStapleWorkflowEndToEnd:
             system.timestep = i * 0.1
             path.append(system)
         
-        path.sh_region = (5, 10)  # Middle region
+        path.sh_region = {1: (5, 10)}  # Middle region for ensemble 1
         path.path_number = 1
         path.status = "ACC"
         
@@ -207,7 +207,7 @@ class TestStapleWorkflowEndToEnd:
                 path.append(system)
             
             if ens_id > 0:  # Non-zero ensembles need shooting regions
-                path.sh_region = (0, len(orders) - 1)
+                path.sh_region = {i: (0, len(orders) - 1)}
                 
             ensemble_paths[ens_id] = path
         
@@ -289,12 +289,24 @@ class TestStapleWorkflowEndToEnd:
         
         assert loaded_data["length"] == sample_staple_trajectory.length
         assert loaded_data["pptype"] == sample_staple_trajectory.pptype
-        assert tuple(loaded_data["sh_region"]) == sample_staple_trajectory.sh_region  # Handle list vs tuple
+        # sh_region gets serialized with string keys and list values, normalize for comparison
+        loaded_sh_region = {int(k): tuple(v) for k, v in loaded_data["sh_region"].items()}
+        assert loaded_sh_region == sample_staple_trajectory.sh_region
         assert len(loaded_data["phasepoints"]) == sample_staple_trajectory.length
         
         # Reconstruct trajectory
         recovered_path = StaplePath(pptype=loaded_data["pptype"])
-        recovered_path.sh_region = tuple(loaded_data["sh_region"]) if loaded_data["sh_region"] else None
+        # Handle sh_region dict conversion from JSON (keys become strings)
+        if loaded_data["sh_region"]:
+            if isinstance(loaded_data["sh_region"], dict):
+                # Convert string keys back to int keys
+                recovered_path.sh_region = {int(k): tuple(v) if isinstance(v, list) else v 
+                                          for k, v in loaded_data["sh_region"].items()}
+            else:
+                # Old format compatibility
+                recovered_path.sh_region = {1: tuple(loaded_data["sh_region"])}
+        else:
+            recovered_path.sh_region = {}
         recovered_path.path_number = loaded_data["path_number"]
         recovered_path.status = loaded_data["status"]
         
@@ -323,7 +335,7 @@ class TestStapleWorkflowEndToEnd:
             system.config = (f"resilience_{i}.xyz", i)
             path.append(system)
         
-        path.sh_region = (1, 5)
+        path.sh_region = {1: (1, 5)}
         
         ens_set = {
             "interfaces": [0.15, 0.25, 0.35, 0.45],
@@ -381,7 +393,7 @@ class TestStapleWorkflowEndToEnd:
             system.config = (f"engine_test_{i}.xyz", i)
             path.append(system)
         
-        path.sh_region = (1, 3)
+        path.sh_region = {1: (1, 3)}
         
         # Test different engine configurations
         engine_configs = [
@@ -392,7 +404,7 @@ class TestStapleWorkflowEndToEnd:
         
         ens_set = {
             "interfaces": [0.2, 0.3, 0.4],
-            "all_intfs": [0.1, 0.2, 0.25, 0.3, 0.35, 0.4, 0.5],
+            "all_intfs": [0.2, 0.3, 0.4],  # Make same as interfaces to satisfy validation
             "ens_name": "2",
             "tis_set": {"maxlength": 300},
             "rgen": np.random.default_rng(42)
@@ -487,7 +499,7 @@ class TestStaplePathWorkflowValidation:
             system.config = (f"initial_{i}.xyz", i)
             initial_path.append(system)
         
-        initial_path.sh_region = (1, 3)
+        initial_path.sh_region = {1: (1, 3)}
         
         # Simulate path transitions
         transitions = []

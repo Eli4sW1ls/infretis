@@ -170,14 +170,16 @@ class TestStaplePathPerformance:
             path.append(system)
         
         # Set shooting region
-        path.sh_region = (100, 900)
+        path.sh_region = {1: (100, 900)}
         rgen = np.random.default_rng(42)
         
         # Time multiple shooting point selections
         start_time = time.time()
         for _ in range(100):
             shooting_point, idx = path.get_shooting_point(rgen)
-            assert path.sh_region[0] <= idx <= path.sh_region[1]
+            # sh_region is now a dict, get the shooting region for ensemble 1
+            start, end = list(path.sh_region.values())[0]
+            assert start <= idx <= end
         end_time = time.time()
         
         # Should be very fast (< 0.1 seconds for 100 selections)
@@ -248,7 +250,7 @@ class TestStaplePathPerformance:
             orders = create_large_staple_path(interfaces, n_cycles=200, turn_interface_pair=(1, 2))
             add_systems_to_path(path, orders, f"mem_path_{path_id}")
             
-            path.sh_region = (500, 1500)
+            path.sh_region = {1: (500, 1500)}
             paths.append(path)
         
         # Test operations on all paths
@@ -360,7 +362,7 @@ class TestStaplePathStressTests:
                                             start_region="A", extra_length=90)
         add_systems_to_path(shared_path, orders, "shared")
         
-        shared_path.sh_region = (10, len(orders) - 10)
+        shared_path.sh_region = {1: (10, len(orders) - 10)}
         
         # Simulate multiple "concurrent" operations
         operations_results = []
@@ -438,7 +440,7 @@ class TestStaplePathBenchmarks:
         orders = create_large_staple_path(interfaces, n_cycles=100, turn_interface_pair=(1, 2))
         add_systems_to_path(path, orders, "consistency")
         
-        path.sh_region = (100, len(orders) - 100)
+        path.sh_region = {1: (100, len(orders) - 100)}
         
         # Test selection times are consistent
         rgen = np.random.default_rng(42)

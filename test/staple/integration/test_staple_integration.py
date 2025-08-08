@@ -122,7 +122,7 @@ class TestStapleWorkflowIntegration:
             path.append(system)
         
         # Set shooting region in the middle
-        path.sh_region = (4, 8)
+        path.sh_region = {1: (4, 8)}
         path.path_number = 42
         path.status = "ACC"
         return path
@@ -296,7 +296,7 @@ class TestStapleWorkflowIntegration:
             system.config = (f"large_{i}.xyz", i)
             large_path.append(system)
         
-        large_path.sh_region = (2, 6)
+        large_path.sh_region = {1: (2, 6)}
         
         # Test staple_sh with length constraints
         success, trial_path, status = staple_sh(
@@ -449,8 +449,8 @@ class TestStapleWorkflowIntegration:
         
         path.path_number = path_number
         path.status = "ACC"
-        path.pptype = ("L", "M", "L")
-        path.sh_region = (2, len(orders) - 3)
+        path.pptype = (1, "LML")
+        path.sh_region = {1: (2, len(orders) - 3)}
         return path
 
     def test_complete_staple_repex_cycle(self):
@@ -555,14 +555,14 @@ class TestStapleWorkflowIntegration:
         paths = {}
         # Create minus path
         minus_path = self.create_complete_staple_path(0)
-        minus_path.pptype = ("L", "M", "L")
+        minus_path.pptype = (0, "LML")
         paths[0] = minus_path
         
         # Create plus paths for ensembles
         for i in range(3):
             path = self.create_complete_staple_path(i + 1)
             # Vary path properties
-            path.pptype = ("L", "M", "R") if i % 2 == 0 else ("R", "M", "L")
+            path.pptype = (i + 1, "LMR") if i % 2 == 0 else (i + 1, "RML")
             paths[i + 1] = path
         
         # Mock ensembles
@@ -585,7 +585,7 @@ class TestStapleWorkflowIntegration:
             if i + 1 < len(state._trajs) and state._trajs[i + 1] is not None:
                 ensemble_path = state._trajs[i + 1]
                 assert ensemble_path.path_number == i + 1  # Path numbers are 1, 2, 3
-                assert ensemble_path.pptype in [("L", "M", "R"), ("R", "M", "L")]
+                assert ensemble_path.pptype[1] in ["LMR", "RML"]  # Check pptype string part
 
 
 class TestStaplePerformance:
@@ -668,8 +668,8 @@ class TestStaplePerformance:
                 system.order = [0.1 + j * 0.05]
                 system.config = (f"memory_frame_{i}_{j}.xyz", j)
                 path.append(system)
-            path.pptype = ("L", "M", "R")
-            path.sh_region = (1, 6)
+            path.pptype = (1, "LMR")
+            path.sh_region = {1: (1, 6)}
             paths.append(path)
         
         # Check that memory usage is reasonable
@@ -709,12 +709,12 @@ class TestStapleWorkflowValidation:
         assert overall_valid  # Overall valid
         
         # Step 2: Path type assignment
-        path.pptype = ("L", "M", "L")
-        assert path.pptype == ("L", "M", "L")
+        path.pptype = (1, "LML")
+        assert path.pptype == (1, "LML")
         
         # Step 3: Shooting region assignment
-        path.sh_region = (1, 5)
-        assert path.sh_region == (1, 5)
+        path.sh_region = {1: (1, 5)}
+        assert path.sh_region == {1: (1, 5)}
         
         # Step 4: Status validation
         path.status = "ACC"
@@ -767,8 +767,8 @@ class TestStapleWorkflowValidation:
             system.config = (f"shooting_frame_{i}.xyz", i)
             path.append(system)
         
-        path.pptype = ("L", "M", "L")
-        path.sh_region = (1, 3)
+        path.pptype = (1, "LML")
+        path.sh_region = {1: (1, 3)}
         
         md_items = {
             "moves": ["st_sh"],

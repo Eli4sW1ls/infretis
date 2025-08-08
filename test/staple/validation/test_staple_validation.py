@@ -206,7 +206,7 @@ class TestStaplePathCorrectness:
         rgen = np.random.default_rng(42)
         
         for start, end in test_regions:
-            path.sh_region = (start, end)
+            path.sh_region = {1: (start, end)}
             
             # Sample many shooting points
             indices = []
@@ -242,7 +242,7 @@ class TestStaplePathStatisticalValidation:
             system.config = (f"dist_{i}.xyz", i)
             path.append(system)
         
-        path.sh_region = (10, 90)
+        path.sh_region = {1: (10, 90)}
         rgen = np.random.default_rng(42)
         
         # Collect many samples
@@ -252,7 +252,7 @@ class TestStaplePathStatisticalValidation:
             samples.append(idx)
         
         # Test uniformity using basic statistical tests
-        min_idx, max_idx = path.sh_region
+        min_idx, max_idx = list(path.sh_region.values())[0]  # Get sh_region from dict
         expected_mean = (min_idx + max_idx) / 2
         actual_mean = np.mean(samples)
         
@@ -280,7 +280,7 @@ class TestStaplePathStatisticalValidation:
             system.config = (f"repro_{i}.xyz", i)
             path.append(system)
         
-        path.sh_region = (1, 6)
+        path.sh_region = {1: (1, 6)}
         
         # Test reproducibility
         results1 = []
@@ -320,7 +320,7 @@ class TestStaplePathStatisticalValidation:
             path.append(system)
         
         # Single-point shooting region
-        path.sh_region = (2, 2)
+        path.sh_region = {1: (2, 2)}
         rgen = np.random.default_rng(42)
         
         # All selections should return the same index
@@ -333,7 +333,7 @@ class TestStaplePathStatisticalValidation:
         assert all(idx == 2 for idx in indices), "Single-point region should always return same index"
         
         # Test with two-point region
-        path.sh_region = (1, 2)
+        path.sh_region = {1: (1, 2)}
         indices = []
         for _ in range(100):
             _, idx = path.get_shooting_point(rgen)
@@ -491,7 +491,7 @@ class TestStaplePathInputValidation:
         ]
         
         for start, end in invalid_regions:
-            path.sh_region = (start, end)
+            path.sh_region = {1: (start, end)}
             
             # Should either handle gracefully or raise appropriate error
             try:
@@ -506,7 +506,7 @@ class TestStaplePathInputValidation:
                 pass
         
         # Test valid shooting region
-        path.sh_region = (2, 7)
+        path.sh_region = {1: (2, 7)}
         try:
             shooting_point, idx = path.get_shooting_point(rgen)
             if shooting_point is not None and idx is not None:

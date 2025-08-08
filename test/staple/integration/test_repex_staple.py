@@ -251,6 +251,7 @@ class TestREPEXStateStaple:
             path = StaplePath()
             path.path_number = i
             path.weights = (0.0, 1.0 if i == 1 else 0.0, 0.0, 0.0)
+            path.pptype = (i + 1, "LMR")  # Set pptype as required by new format
             # Add some phasepoints
             for j in range(5):
                 system = System()
@@ -350,7 +351,7 @@ class TestREPEXStateStapleTreatOutput:
         path.path_number = 1
         path.status = "ACC"
         path.sh_region = (1, len(orders) - 2)  # Valid shooting region
-        path.pptype = "LML"  # Valid path type as string
+        path.pptype = (1, "LML")  # Valid path type as tuple
         return path
 
     def create_invalid_turn_path(self):
@@ -469,7 +470,7 @@ class TestREPEXStateStapleTreatOutput:
         # Create path without proper sh_region/ptype
         path = self.create_valid_staple_path()
         path.sh_region = ()  # Invalid sh_region
-        path.pptype = ""  # Invalid ptype
+        path.pptype = None  # Invalid pptype (None)
         
         md_items = {
             "picked": {
@@ -558,8 +559,8 @@ class TestStapleEnsembleValidation:
             system.config = (f"frame_{i}.xyz", i)
             path.append(system)
         
-        path.pptype = ("L", "M", "R")
-        path.sh_region = (1, 3)
+        path.pptype = (1, "LMR")
+        path.sh_region = {1: (1, 3)}
         
         # Test adding to positive ensemble
         valid = (0.0, 1.0, 0.0, 0.0)
@@ -624,8 +625,8 @@ class TestStapleStateManagement:
             system.config = (f"frame_{i}.xyz", i)
             path.append(system)
         
-        path.pptype = ("L", "M", "L")
-        path.sh_region = (1, 5)
+        path.pptype = (1, "LML")
+        path.sh_region = {1: (1, 5)}
         path.path_number = 1
         
         # Add trajectory and check traj_data
@@ -658,8 +659,8 @@ class TestStapleStateManagement:
                 path.append(system)
             
             path.path_number = path_num
-            path.pptype = ("L", "M", "R")
-            path.sh_region = (1, 3)
+            path.pptype = (1, "LMR")
+            path.sh_region = {1: (1, 3)}
             
             valid = (0.0, 1.0 if path_num == 1 else 0.0, 0.0, 0.0)
             state.add_traj(path_num, path, valid)
@@ -763,8 +764,8 @@ class TestStapleMockEnhancement:
         
         path.path_number = 99
         path.status = "ACC"
-        path.pptype = ("L", "M", "L")
-        path.sh_region = (5, len(orders) - 5)
+        path.pptype = (1, "LML")
+        path.sh_region = {1: (5, len(orders) - 5)}
         path.generated = ("st_sh", 0.25, 3, len(orders))
         
         return path
@@ -951,8 +952,8 @@ class TestStapleIntegrationWorkflow:
                 path.append(system)
             
             path.path_number = i + 10
-            path.pptype = ("L", "M", "R")
-            path.sh_region = (1, 5)
+            path.pptype = (1, "LMR")
+            path.sh_region = {1: (1, 5)}
             path.status = "ACC"
             
             valid = np.zeros(state.n)

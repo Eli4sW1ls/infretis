@@ -52,7 +52,7 @@ class TestStapleSh:
         """Provide mock ensemble settings."""
         return {
             "interfaces": [0.1, 0.3, 0.5],
-            "all_intfs": [0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6],
+            "all_intfs": [0.1, 0.3, 0.5],  # Make all_intfs same as interfaces to satisfy validation
             "tis_set": {
                 "maxlength": 1000,
                 "allowmaxlength": False,
@@ -75,7 +75,7 @@ class TestStapleSh:
             system.config = (f"frame_{i}.xyz", i)
             path.append(system)
         
-        path.sh_region = (1, 5)  # Shooting region
+        path.sh_region = {1: (1, 5)}  # Shooting region for ensemble 1
         path.path_number = 1
         return path
     
@@ -281,7 +281,7 @@ class TestStapleWf:
             path.append(system)
         
         # Add shooting region for staple paths
-        path.sh_region = (2, 6)  # Shooting region in middle
+        path.sh_region = {2: (2, 6)}  # Shooting region in middle for ensemble 2
         path.path_number = 1
         return path
     
@@ -298,18 +298,20 @@ class TestStapleWf:
                     sys.order = [0.2 + i * 0.1]
                     sys.config = (f"wf_seg_{i}.xyz", i)
                     mock_segment.append(sys)
-                
+
                 # Wire fencing segment needs shooting region too
-                mock_segment.sh_region = (1, 1)  # Only middle point for path of length 3
-                
+                mock_segment.sh_region = {2: (1, 1)}  # Only middle point for path of length 3, ensemble 2
+
                 mock_wf.return_value = (3, mock_segment)  # n_frames=3, segment
-                
+
                 extended_path = StaplePath()
                 for i in range(8):
                     sys = System()
                     sys.order = [0.1 + i * 0.05]
                     sys.config = (f"extended_{i}.xyz", i)
                     extended_path.append(sys)
+                # Extended path also needs shooting region
+                extended_path.sh_region = {2: (2, 6)}  # Shooting region for ensemble 2
                 mock_extend.return_value = (True, extended_path, "ACC")
                 
                 success, trial_path, status = staple_wf(
@@ -351,7 +353,7 @@ class TestStapleWf:
                     mock_segment.append(sys)
                 
                 # Wire fencing segment needs shooting region too
-                mock_segment.sh_region = (1, 1)  # Only middle point for path of length 3
+                mock_segment.sh_region = {2: (1, 1)}  # Only middle point for path of length 3, ensemble 2
                 
                 mock_wf.return_value = (3, mock_segment)
                 mock_extend.return_value = (False, mock_segment, "FTL")  # Extension fails

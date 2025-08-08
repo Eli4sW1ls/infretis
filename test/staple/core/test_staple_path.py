@@ -25,8 +25,8 @@ class TestStaplePath:
         path = StaplePath(maxlen=100, time_origin=0, pptype="")
         assert path.maxlen == 100
         assert path.time_origin == 0
-        assert path.pptype == ""
-        assert path.sh_region is None
+        assert path.pptype is None  # pptype is now Optional[Tuple[int, str]] and defaults to None
+        assert path.sh_region == {}  # sh_region is now a dict and defaults to empty dict
         # Test new caching attributes
         assert hasattr(path, '_cached_orders')
         assert hasattr(path, '_cached_orders_version')
@@ -42,19 +42,24 @@ class TestStaplePath:
         path = StaplePath(maxlen=50, time_origin=10, pptype="LML")
         assert path.maxlen == 50
         assert path.time_origin == 10
-        assert path.pptype == "LML"
-        assert path.sh_region is None
+        assert path.pptype is None  # pptype parameter is ignored, attribute defaults to None
+        assert path.sh_region == {}  # sh_region is now a dict and defaults to empty dict
         # Test caching is properly initialized
         assert path._cached_orders is None
 
     def test_pptype_assignment_validation(self):
         """Test that pptype is properly assigned and validated."""
-        valid_pptypes = ["", "LML", "RMR", "0-", "-0", "00"]
+        # pptype is now Optional[Tuple[int, str]]
+        path = StaplePath()
+        assert path.pptype is None
         
-        for pptype in valid_pptypes:
-            path = StaplePath(pptype=pptype)
-            assert path.pptype == pptype
-            assert isinstance(path.pptype, str)
+        # Test setting valid pptype tuple
+        path.pptype = (1, "LML")
+        assert path.pptype == (1, "LML")
+        assert isinstance(path.pptype, tuple)
+        assert len(path.pptype) == 2
+        assert isinstance(path.pptype[0], int)
+        assert isinstance(path.pptype[1], str)
 
     def test_caching_mechanism(self):
         """Test the new caching mechanism for order parameters."""
@@ -361,12 +366,15 @@ class TestStaplePath:
             "interfaces": [0.25, 0.35, 0.45]  # 3 adjacent interfaces
         }
         
-        pp_path, ptype, sh_region = path.get_pp_path(ens["all_intfs"], ens["interfaces"])
+        # Test extraction of PP path from staple path - methods now separate
+        pp_path = path.get_pp_path(ens["all_intfs"], ens["interfaces"])
+        pptype = path.get_pptype(ens["all_intfs"], ens["interfaces"])
+        sh_region = path.get_sh_region(ens["all_intfs"], ens["interfaces"])
         
         # PP path should be shorter than original staple path
         assert pp_path.length <= path.length
         assert pp_path.length >= 2  # Must have at least start and end
-        assert isinstance(ptype, str)  # ptype should be a string
+        assert isinstance(pptype, str)  # pptype should be a string
         assert isinstance(sh_region, tuple)  # sh_region should be a tuple
 
     def test_get_pp_path_invalid_interfaces(self):
@@ -393,7 +401,7 @@ class TestStaplePath:
             path.append(pp)
         
         # Set up shooting region (required for shooting point selection)
-        path.sh_region = (1, 7)  # Allow shooting from indices 1 to 7
+        path.sh_region = {1: (1, 7)}  # Allow shooting from indices 1 to 7 for ensemble 1
         
         # Mock random generator
         rgen = np.random.default_rng(42)
@@ -401,7 +409,9 @@ class TestStaplePath:
         shooting_point, idx = path.get_shooting_point(rgen)
         
         assert shooting_point is not None
-        assert path.sh_region[0] <= idx <= path.sh_region[1]
+        # sh_region is now a dict, get the first (and only) value
+        start, end = list(path.sh_region.values())[0]
+        assert start <= idx <= end
         assert shooting_point.order is not None
 
     def test_get_shooting_point_no_region_error(self):
@@ -424,7 +434,7 @@ class TestStaplePath:
         for pp in phasepoints:
             path.append(pp)
         
-        path.sh_region = (1, 5)
+        path.sh_region = {1: (1, 5)}
         
         path_copy = path.copy()
         
@@ -442,7 +452,7 @@ class TestStaplePath:
         assert isinstance(empty, StaplePath)
         assert empty.maxlen == 50
         assert empty.length == 0
-        assert empty.pptype == ""  # Empty path should have empty ptype
+        assert empty.pptype is None  # Empty path should have None pptype
 
     def test_equality(self):
         """Test path equality comparison."""
@@ -719,20 +729,20 @@ class TestStaplePathUtilities:
             system.extra_data = {"nested": {"value": i}}
             original.append(system)
         
-        original.sh_region = (1, 3)
-        original.pptype = "LML"
+        original.sh_region = {1: (1, 3)}
+        original.pptype = (1, "LML")
         
         # Create copy
         copied = original.copy()
         
         # Modify original
         original.phasepoints[0].order[0] = 999.0
-        original.pptype = "LMR"
-        original.sh_region = (2, 4)
+        original.pptype = (1, "LMR")
+        original.sh_region = {2: (2, 4)}
         
         # Copy should be unchanged
         assert copied.phasepoints[0].order[0] == 999.0
-        assert copied.sh_region == (1, 3)
+        assert copied.sh_region == {1: (1, 3)}
 
 
 class TestStaplePathAnalysis:
@@ -783,7 +793,7 @@ class TestStaplePathAnalysis:
         path = self.create_complex_staple_path()
         
         # Test different shooting region settings
-        path.sh_region = (5, 15)  # Middle region
+        path.sh_region = {1: (5, 15)}  # Middle region for ensemble 1
         
         rgen = np.random.default_rng(42)
         
@@ -798,8 +808,10 @@ class TestStaplePathAnalysis:
         
         # Check that all indices are within shooting region
         if path.sh_region:
+            # Get the shooting region from the dictionary (assuming single ensemble)
+            start, end = list(path.sh_region.values())[0]
             for idx in indices:
-                assert path.sh_region[0] <= idx <= path.sh_region[1]
+                assert start <= idx <= end
         else:
             # Should be within reasonable bounds
             for idx in indices:
@@ -880,7 +892,7 @@ class TestStapleEdgeCases:
         
         # Test basic properties
         assert empty_path.length == 0
-        assert empty_path.sh_region is None
+        assert empty_path.sh_region == {}  # sh_region is now an empty dict
         
         # Test turn detection on empty path
         interfaces = [0.1, 0.3, 0.5]
@@ -1065,8 +1077,11 @@ class TestStaplePathTypeValidation:
         # Test ptype assignment if get_pp_path exists
         if hasattr(path, 'get_pp_path'):
             try:
-                _, ptype, sh_region = path.get_pp_path(interfaces, interfaces)
-                assert "L" in ptype or "M" in ptype
+                # Test methods that now exist separately
+                pp_path = path.get_pp_path(interfaces, interfaces)
+                pptype = path.get_pptype(interfaces, interfaces)
+                sh_region = path.get_sh_region(interfaces, interfaces)
+                assert "L" in pptype or "M" in pptype
             except (AttributeError, NotImplementedError):
                 pass
     
@@ -1280,13 +1295,13 @@ class TestStapleRegression:
         # Test that standard attributes work
         path.path_number = 1
         path.status = "ACC"
-        path.pptype = "LML"
-        path.sh_region = (1, 3)
+        path.pptype = (1, "LML")
+        path.sh_region = {1: (1, 3)}
         
         assert path.path_number == 1
         assert path.status == "ACC"
-        assert path.pptype == "LML"
-        assert path.sh_region == (1, 3)
+        assert path.pptype == (1, "LML")
+        assert path.sh_region == {1: (1, 3)}
     
     def test_ensemble_zero_path_object_usage(self):
         """Regression test for ensemble 0 using Path vs StaplePath."""
@@ -1407,9 +1422,9 @@ class TestStapleRegression:
         # Test turn detection
         start_info, end_info, valid = path.check_turns(interfaces)
         
-        # Test that ptype can be assigned and retrieved
-        path.pptype = ("L", "M", "L")
-        assert path.pptype == ("L", "M", "L")
+        # Test that pptype can be assigned and retrieved
+        path.pptype = (1, "LML")
+        assert path.pptype == (1, "LML")
         
         # Test ptype string conversion
         if hasattr(path, 'get_ptype_string'):
@@ -1454,11 +1469,12 @@ class TestStapleRegression:
         valid_regions = [(1, 5), (2, 4), (1, len(orders)-2)]
         
         for region in valid_regions:
-            path.sh_region = region
-            assert path.sh_region == region
-            assert path.sh_region[0] < path.sh_region[1]
-            assert path.sh_region[0] >= 0
-            assert path.sh_region[1] < len(path.phasepoints)
+            path.sh_region = {1: region}  # Store as dict with ensemble 1
+            assert path.sh_region == {1: region}
+            start, end = list(path.sh_region.values())[0]
+            assert start < end
+            assert start >= 0
+            assert end < len(path.phasepoints)
 
 
 class TestStapleErrorHandling:
@@ -1534,9 +1550,10 @@ class TestStaplePathTypeValidation:
                 path.append(system)
             
             # Test that ptype can be assigned
-            path.pptype = ("L", "M", "R")
-            assert len(path.pptype) == 3
-            assert all(isinstance(p, str) for p in path.pptype)
+            path.pptype = (1, "LMR")
+            assert len(path.pptype) == 2  # Should be (ensemble_num, pptype_string)
+            assert isinstance(path.pptype[0], int)
+            assert isinstance(path.pptype[1], str)
             
     def test_shooting_region_boundary_validation(self):
         """Test shooting region boundary validation."""
@@ -1553,10 +1570,11 @@ class TestStaplePathTypeValidation:
         # Test valid shooting regions
         valid_regions = [(1, 5), (2, 4), (0, 6)]
         for region in valid_regions:
-            path.sh_region = region
-            assert path.sh_region[0] >= 0
-            assert path.sh_region[1] < len(path.phasepoints)
-            assert path.sh_region[0] < path.sh_region[1]
+            path.sh_region = {1: region}  # Store as dict with ensemble 1
+            start, end = list(path.sh_region.values())[0]
+            assert start >= 0
+            assert end < len(path.phasepoints)
+            assert start < end
 
 
 if __name__ == "__main__":
