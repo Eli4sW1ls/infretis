@@ -22,10 +22,10 @@ class TestStaplePath:
 
     def test_init(self):
         """Test that StaplePath can be initialized."""
-        path = StaplePath(maxlen=100, time_origin=0, ptype="")
+        path = StaplePath(maxlen=100, time_origin=0, pptype="")
         assert path.maxlen == 100
         assert path.time_origin == 0
-        assert path.ptype == ""
+        assert path.pptype == ""
         assert path.sh_region is None
         # Test new caching attributes
         assert hasattr(path, '_cached_orders')
@@ -37,24 +37,24 @@ class TestStaplePath:
         assert path._path_version == 0
         assert path._cached_turn_info is None
 
-    def test_init_with_ptype(self):
-        """Test that StaplePath can be initialized with ptype."""
-        path = StaplePath(maxlen=50, time_origin=10, ptype="LML")
+    def test_init_with_pptype(self):
+        """Test that StaplePath can be initialized with pptype."""
+        path = StaplePath(maxlen=50, time_origin=10, pptype="LML")
         assert path.maxlen == 50
         assert path.time_origin == 10
-        assert path.ptype == "LML"
+        assert path.pptype == "LML"
         assert path.sh_region is None
         # Test caching is properly initialized
         assert path._cached_orders is None
 
-    def test_ptype_assignment_validation(self):
-        """Test that ptype is properly assigned and validated."""
-        valid_ptypes = ["", "LML", "RMR", "0-", "-0", "00"]
+    def test_pptype_assignment_validation(self):
+        """Test that pptype is properly assigned and validated."""
+        valid_pptypes = ["", "LML", "RMR", "0-", "-0", "00"]
         
-        for ptype in valid_ptypes:
-            path = StaplePath(ptype=ptype)
-            assert path.ptype == ptype
-            assert isinstance(path.ptype, str)
+        for pptype in valid_pptypes:
+            path = StaplePath(pptype=pptype)
+            assert path.pptype == pptype
+            assert isinstance(path.pptype, str)
 
     def test_caching_mechanism(self):
         """Test the new caching mechanism for order parameters."""
@@ -221,7 +221,7 @@ class TestStaplePath:
 
     def test_check_start_turn_valid(self):
         """Test start turn detection with valid turn."""
-        path = StaplePath(ptype="")
+        path = StaplePath(pptype="")
         phasepoints = self.create_phasepoints()
         for pp in phasepoints:
             path.append(pp)
@@ -239,7 +239,7 @@ class TestStaplePath:
 
     def test_check_start_turn_invalid_short_path(self):
         """Test start turn detection with too short path."""
-        path = StaplePath(ptype="")
+        path = StaplePath(pptype="")
         system = System()
         system.order = [0.3]
         system.config = ("frame_0.xyz", 0)
@@ -257,7 +257,7 @@ class TestStaplePath:
 
     def test_check_end_turn_valid(self):
         """Test end turn detection with valid turn."""
-        path = StaplePath(ptype="")
+        path = StaplePath(pptype="")
         phasepoints = self.create_phasepoints()
         for pp in phasepoints:
             path.append(pp)
@@ -273,7 +273,7 @@ class TestStaplePath:
 
     def test_check_turns_both_valid(self):
         """Test that both start and end turns are detected."""
-        path = StaplePath(ptype="")
+        path = StaplePath(pptype="")
         phasepoints = self.create_phasepoints()
         for pp in phasepoints:
             path.append(pp)
@@ -287,7 +287,7 @@ class TestStaplePath:
 
     def test_check_turns_no_turns(self):
         """Test turn detection with incomplete turn pattern (no complete turns)."""
-        path = StaplePath(ptype="")
+        path = StaplePath(pptype="")
         # Create a path that starts a turn but doesn't complete it
         # Goes up and crosses interface 3, then down to interface 2, but doesn't cross back
         orders = [
@@ -312,7 +312,7 @@ class TestStaplePath:
 
     def test_boundary_turn_detection(self):
         """Test turn detection for trajectories starting outside boundaries."""
-        path = StaplePath(ptype="")
+        path = StaplePath(pptype="")
         # Create path starting outside left boundary
         orders = [0.05, 0.1, 0.2, 0.3, 0.2, 0.1, 0.05]  # Starts below interfaces[0] = 0.15
         for i, order in enumerate(orders):
@@ -331,7 +331,7 @@ class TestStaplePath:
 
     def test_boundary_turn_detection_right_side(self):
         """Test turn detection for trajectories starting outside right boundary."""
-        path = StaplePath(ptype="")
+        path = StaplePath(pptype="")
         # Create path starting outside right boundary
         orders = [0.50, 0.4, 0.3, 0.2, 0.3, 0.4, 0.50]  # Starts above interfaces[-1] = 0.45
         for i, order in enumerate(orders):
@@ -350,7 +350,7 @@ class TestStaplePath:
 
     def test_get_pp_path(self):
         """Test extraction of PP path from staple path."""
-        path = StaplePath(ptype="")
+        path = StaplePath(pptype="")
         phasepoints = self.create_phasepoints()
         for pp in phasepoints:
             path.append(pp)
@@ -371,7 +371,7 @@ class TestStaplePath:
 
     def test_get_pp_path_invalid_interfaces(self):
         """Test get_pp_path with invalid interface configuration."""
-        path = StaplePath(ptype="")
+        path = StaplePath(pptype="")
         # Add some phasepoints
         for i in range(5):
             system = System()
@@ -387,7 +387,7 @@ class TestStaplePath:
 
     def test_get_shooting_point(self):
         """Test shooting point selection."""
-        path = StaplePath(ptype="")
+        path = StaplePath(pptype="")
         phasepoints = self.create_phasepoints()
         for pp in phasepoints:
             path.append(pp)
@@ -406,7 +406,7 @@ class TestStaplePath:
 
     def test_get_shooting_point_no_region_error(self):
         """Test error when getting shooting point without defined region."""
-        path = StaplePath(ptype="")
+        path = StaplePath(pptype="")
         phasepoints = self.create_phasepoints()
         for pp in phasepoints:
             path.append(pp)
@@ -419,7 +419,7 @@ class TestStaplePath:
 
     def test_copy(self):
         """Test path copying."""
-        path = StaplePath(ptype="LML")
+        path = StaplePath(pptype="LML")
         phasepoints = self.create_phasepoints()
         for pp in phasepoints:
             path.append(pp)
@@ -430,24 +430,24 @@ class TestStaplePath:
         
         assert path_copy.length == path.length
         assert path_copy.sh_region == path.sh_region
-        assert path_copy.ptype == path.ptype
+        assert path_copy.pptype == path.pptype
         assert path_copy is not path  # Different objects
         assert path_copy.phasepoints is not path.phasepoints  # Different lists
 
     def test_empty_path(self):
         """Test empty path creation."""
-        path = StaplePath(ptype="RMR")
+        path = StaplePath(pptype="RMR")
         empty = path.empty_path(maxlen=50)
         
         assert isinstance(empty, StaplePath)
         assert empty.maxlen == 50
         assert empty.length == 0
-        assert empty.ptype == ""  # Empty path should have empty ptype
+        assert empty.pptype == ""  # Empty path should have empty ptype
 
     def test_equality(self):
         """Test path equality comparison."""
-        path1 = StaplePath(ptype="LML")
-        path2 = StaplePath(ptype="LML")
+        path1 = StaplePath(pptype="LML")
+        path2 = StaplePath(pptype="LML")
         
         phasepoints = self.create_phasepoints()
         for pp in phasepoints:
@@ -563,7 +563,7 @@ class TestPastePaths:
 
     def create_test_path(self, orders, reverse=False):
         """Create a test path with given order parameters."""
-        path = StaplePath(ptype="")
+        path = StaplePath(pptype="")
         path.time_origin = 0
         
         if reverse:
@@ -636,7 +636,7 @@ class TestPastePaths:
 
     def test_paste_paths_empty_paths(self):
         """Test pasting with empty paths."""
-        empty_path = StaplePath(ptype="")
+        empty_path = StaplePath(pptype="")
         normal_path = self.create_test_path([0.1, 0.2, 0.3])
         
         # Empty back path
@@ -720,14 +720,14 @@ class TestStaplePathUtilities:
             original.append(system)
         
         original.sh_region = (1, 3)
-        original.ptype = "LML"
+        original.pptype = "LML"
         
         # Create copy
         copied = original.copy()
         
         # Modify original
         original.phasepoints[0].order[0] = 999.0
-        original.ptype = "LMR"
+        original.pptype = "LMR"
         original.sh_region = (2, 4)
         
         # Copy should be unchanged
@@ -1280,12 +1280,12 @@ class TestStapleRegression:
         # Test that standard attributes work
         path.path_number = 1
         path.status = "ACC"
-        path.ptype = "LML"
+        path.pptype = "LML"
         path.sh_region = (1, 3)
         
         assert path.path_number == 1
         assert path.status == "ACC"
-        assert path.ptype == "LML"
+        assert path.pptype == "LML"
         assert path.sh_region == (1, 3)
     
     def test_ensemble_zero_path_object_usage(self):
@@ -1408,8 +1408,8 @@ class TestStapleRegression:
         start_info, end_info, valid = path.check_turns(interfaces)
         
         # Test that ptype can be assigned and retrieved
-        path.ptype = ("L", "M", "L")
-        assert path.ptype == ("L", "M", "L")
+        path.pptype = ("L", "M", "L")
+        assert path.pptype == ("L", "M", "L")
         
         # Test ptype string conversion
         if hasattr(path, 'get_ptype_string'):
@@ -1534,9 +1534,9 @@ class TestStaplePathTypeValidation:
                 path.append(system)
             
             # Test that ptype can be assigned
-            path.ptype = ("L", "M", "R")
-            assert len(path.ptype) == 3
-            assert all(isinstance(p, str) for p in path.ptype)
+            path.pptype = ("L", "M", "R")
+            assert len(path.pptype) == 3
+            assert all(isinstance(p, str) for p in path.pptype)
             
     def test_shooting_region_boundary_validation(self):
         """Test shooting region boundary validation."""

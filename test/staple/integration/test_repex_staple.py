@@ -350,7 +350,7 @@ class TestREPEXStateStapleTreatOutput:
         path.path_number = 1
         path.status = "ACC"
         path.sh_region = (1, len(orders) - 2)  # Valid shooting region
-        path.ptype = "LML"  # Valid path type as string
+        path.pptype = "LML"  # Valid path type as string
         return path
 
     def create_invalid_turn_path(self):
@@ -469,7 +469,7 @@ class TestREPEXStateStapleTreatOutput:
         # Create path without proper sh_region/ptype
         path = self.create_valid_staple_path()
         path.sh_region = ()  # Invalid sh_region
-        path.ptype = ""  # Invalid ptype
+        path.pptype = ""  # Invalid ptype
         
         md_items = {
             "picked": {
@@ -558,7 +558,7 @@ class TestStapleEnsembleValidation:
             system.config = (f"frame_{i}.xyz", i)
             path.append(system)
         
-        path.ptype = ("L", "M", "R")
+        path.pptype = ("L", "M", "R")
         path.sh_region = (1, 3)
         
         # Test adding to positive ensemble
@@ -624,7 +624,7 @@ class TestStapleStateManagement:
             system.config = (f"frame_{i}.xyz", i)
             path.append(system)
         
-        path.ptype = ("L", "M", "L")
+        path.pptype = ("L", "M", "L")
         path.sh_region = (1, 5)
         path.path_number = 1
         
@@ -658,7 +658,7 @@ class TestStapleStateManagement:
                 path.append(system)
             
             path.path_number = path_num
-            path.ptype = ("L", "M", "R")
+            path.pptype = ("L", "M", "R")
             path.sh_region = (1, 3)
             
             valid = (0.0, 1.0 if path_num == 1 else 0.0, 0.0, 0.0)
@@ -763,7 +763,7 @@ class TestStapleMockEnhancement:
         
         path.path_number = 99
         path.status = "ACC"
-        path.ptype = ("L", "M", "L")
+        path.pptype = ("L", "M", "L")
         path.sh_region = (5, len(orders) - 5)
         path.generated = ("st_sh", 0.25, 3, len(orders))
         
@@ -951,7 +951,7 @@ class TestStapleIntegrationWorkflow:
                 path.append(system)
             
             path.path_number = i + 10
-            path.ptype = ("L", "M", "R")
+            path.pptype = ("L", "M", "R")
             path.sh_region = (1, 5)
             path.status = "ACC"
             
@@ -966,7 +966,7 @@ class TestStapleIntegrationWorkflow:
                 "max_op": [0.65],
                 "min_op": [0.05],
                 "frac": np.zeros(state.n),
-                "ptype": "LMR",
+                "pptype": "LMR",
                 "sh_region": (1, 5)
             }
         

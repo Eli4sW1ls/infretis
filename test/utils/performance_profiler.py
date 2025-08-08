@@ -175,7 +175,7 @@ class StaplePerformanceProfiler:
             orders = create_large_staple_path(interfaces, n_cycles=length // 20)[:length]
             add_systems_to_path(path, orders, "copy_profile")
             path.sh_region = (10, length - 10)
-            path.ptype = "LML"
+            path.pptype = "LML"
             
             with self.profile_operation(f"path_copying", path_length=length):
                 for _ in range(10):  # Multiple copies to get meaningful timing
@@ -218,7 +218,7 @@ class StaplePerformanceProfiler:
             path = StaplePath()
             orders = create_staple_path_with_turn(interfaces, (1, 2), "A", length // 5)[:length]
             add_systems_to_path(path, orders, "pp_profile")
-            path.ptype = "LML"
+            path.pptype = "LML"
             path.sh_region = (5, length - 5)
             
             with self.profile_operation(f"get_pp_path", path_length=length):

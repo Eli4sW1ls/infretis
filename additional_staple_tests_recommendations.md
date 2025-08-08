@@ -35,7 +35,7 @@ class TestREPEXStateStapleTreatOutput:
         result = state.treat_output(md_items)
         
         # Verify turn validation occurred
-        # Verify ptype assignment
+        # Verify pptype assignment
         # Verify sh_region handling
         
     def test_treat_output_invalid_turns_error(self, basic_config):
@@ -54,10 +54,10 @@ class TestREPEXStateStapleTreatOutput:
             state.treat_output(md_items)
     
     def test_treat_output_sh_region_fallback(self, basic_config):
-        """Test treat_output handles missing sh_region/ptype."""
+        """Test treat_output handles missing sh_region/pptype."""
         # Test the critical logic:
-        # if len(out_traj.sh_region) != 2 or len(out_traj.ptype) < 3:
-        #     _, pptype, sh_region = out_traj.get_pp_path(...)
+        # if len(out_traj.sh_region) != 2 or len(out_traj.ppptype) < 3:
+        #     _, ppptype, sh_region = out_traj.get_pp_path(...)
 ```
 
 ## 2. **Path Type Classification and Validation** ⭐ **HIGH PRIORITY**
@@ -69,23 +69,23 @@ class TestREPEXStateStapleTreatOutput:
 class TestStaplePathTypeValidation:
     """Test path type classification and validation."""
     
-    def test_ptype_generation_lml(self):
+    def test_pptype_generation_lml(self):
         """Test LML path type generation."""
         path = StaplePath()
         # Create L->M->L pattern
         orders = [0.05, 0.25, 0.45, 0.25, 0.05]
-        # Verify ptype becomes "LML" after processing
+        # Verify pptype becomes "LML" after processing
         
-    def test_ptype_generation_rmr(self):
+    def test_pptype_generation_rmr(self):
         """Test RMR path type generation."""
         # Similar for R->M->R pattern
         
-    def test_ptype_generation_complex_patterns(self):
-        """Test complex ptype patterns like LMLRMR."""
+    def test_pptype_generation_complex_patterns(self):
+        """Test complex pptype patterns like LMLRMR."""
         # Test multi-turn paths
         
-    def test_invalid_ptype_patterns(self):
-        """Test detection of invalid ptype patterns."""
+    def test_invalid_pptype_patterns(self):
+        """Test detection of invalid pptype patterns."""
         # Test paths that don't form valid staple patterns
 ```
 
@@ -125,7 +125,7 @@ class TestStapleWorkflowIntegration:
         
     def test_staple_path_persistence(self):
         """Test that staple paths maintain properties through REPEX cycle."""
-        # Test sh_region and ptype persistence
+        # Test sh_region and pptype persistence
         
     def test_multiple_ensemble_staple_simulation(self):
         """Test staple simulation across multiple ensembles."""
@@ -209,7 +209,7 @@ class TestStapleStateManagement:
     
     def test_traj_data_staple_specific_fields(self):
         """Test that traj_data includes staple-specific fields."""
-        # Test "ptype" and "sh_region" fields in traj_data
+        # Test "pptype" and "sh_region" fields in traj_data
         
     def test_path_numbering_in_staple_mode(self):
         """Test path numbering consistency in staple mode."""
@@ -281,7 +281,7 @@ class TestStapleRegression:
 ## Recommended Implementation Strategy:
 
 1. Start with `TestREPEXStateStapleTreatOutput` class focusing on the critical `treat_output` method
-2. Add path type classification tests to ensure ptype generation works correctly
+2. Add path type classification tests to ensure pptype generation works correctly
 3. Enhance error handling tests for edge cases
 4. Add integration tests for complete workflow validation
 5. Implement regression tests for known issues

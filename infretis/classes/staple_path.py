@@ -29,15 +29,15 @@ logger.addHandler(logging.NullHandler())
 class StaplePath(Path):
     """Path class that supports turns and restricted shooting point selection."""
     
-    def __init__(self, maxlen: int = DEFAULT_MAXLEN, time_origin: int = 0, ptype: str = ""):
+    def __init__(self, maxlen: int = DEFAULT_MAXLEN, time_origin: int = 0, pptype: str = ""):
         """Initialize a turn path."""
         super().__init__(maxlen, time_origin)
         self._cached_orders = None
         self._cached_orders_version = 0
         self._path_version = 0
         self._cached_turn_info = None  # Cache for turn detection results
-        self.sh_region: Tuple[int] = None  # Indices where turns occur
-        self.ptype = ptype 
+        self.sh_region: dict[int, Tuple[int, int]] = {}  # Indices where turns occur
+        self.pptype: Optional[Tuple[int, str]] = None  # Type of each phase point
 
     def _invalidate_cache(self):
         """Invalidate cached data when path changes."""
@@ -285,12 +285,12 @@ class StaplePath(Path):
     def get_shooting_point(self, rgen) -> Tuple[System, int]:
         """Shooting point selection with bounds checking."""
         
-        if self.sh_region is None:
-            logger.warning("No shooting region defined, cannot select a shooting point.")
+        if len(self.sh_region) != 1:
+            logger.warning("No valid shooting region defined, cannot select a shooting point.")
             raise ValueError("Shooting region is not defined.")
             
         # Pre-validate bounds
-        start, end = self.sh_region
+        start, end = list(self.sh_region.values())[0]
         if start > end or start <= 0 or end >= self.length-1:
             logger.error(f"Invalid shooting region: {self.sh_region} for path length {self.length}")
             raise ValueError(f"Invalid shooting region: {self.sh_region} for path length {self.length}")
@@ -300,13 +300,113 @@ class StaplePath(Path):
         logger.debug(f"Selected point with orderp {self.phasepoints[idx].order[0]}")
         return self.phasepoints[idx], idx
 
-    def get_pp_path(self, intfs: List[float], pp_intfs: List[float]) -> Tuple[Path, str, Tuple[int, int]]:
-        """Optimized path extraction with reduced complexity."""
+    def get_pptype(self, intfs: List[float], pp_intfs: List[float]) -> str:
+        """Determine the 3-character pptype for the path."""
+        # Early validation
+        if len(pp_intfs) <= 1:
+            logger.warning("Insufficient pp interfaces for pptype determination.")
+            return "***"
+            
+        # Validate that pp_intfs is a subset of intfs
+        assert str(list(dict.fromkeys(pp_intfs)))[1:-1] in str(intfs)[1:-1], f"Invalid interface indices: {intfs, pp_intfs}"
+            
+        interfaces = np.array(intfs)
+        
+        # Use cached turn information if available
+        if self._cached_turn_info is None:
+            start_info, end_info, valid = self.check_turns(interfaces)
+            self._cached_turn_info = (start_info, end_info, valid)
+        else:
+            start_info, end_info, valid = self._cached_turn_info
+            
+        if not valid:
+            logger.warning("Invalid path segment, cannot determine pptype.")
+            return "***"
+            
+        # Simplified path extraction for common cases
+        if len(intfs) <= 3:
+            return self._determine_simple_pptype(pp_intfs)
+        
+        # For complex cases, use optimized border detection
+        # _, _, pptype = self._find_borders(start_info, end_info, pp_intfs)
+        if start_info[1] < end_info[1]:
+            if interfaces[start_info[1]] < pp_intfs[1] < interfaces[end_info[1]]:
+                pptype = "LMR"
+            elif interfaces[end_info[1]] == pp_intfs[1]:
+                pptype = "LML"
+            elif interfaces[start_info[1]] == pp_intfs[1]:
+                pptype = "RMR"
+            else:
+                pptype = "***"
+        elif start_info[1] > end_info[1]:
+            if interfaces[start_info[1]] > pp_intfs[1] > interfaces[end_info[1]]:
+                pptype = "RML"
+            elif interfaces[start_info[1]] == pp_intfs[1]:
+                pptype = "LML"
+            elif interfaces[end_info[1]] == pp_intfs[1]:
+                pptype = "RMR"
+            else:
+                pptype = "***"
+        elif pp_intfs[0] == pp_intfs[1]:
+            if start_info[1] == 0:
+                if self.ordermax[0] > pp_intfs[2]:
+                    pptype = "LMR"
+                else:
+                    pptype = "LML"
+            elif start_info[1] == len(interfaces) - 1:
+                if self.ordermin < pp_intfs[0]:     # Future-proof for if there is a B ensemble
+                    pptype = "RML"
+                else:
+                    pptype = "RMR"
+            else:
+                pptype = "***"
+        else:
+            pptype = "***"
+        
+        return pptype
+
+    def get_sh_region(self, intfs: List[float], pp_intfs: List[float]) -> Tuple[int, int]:
+        """Determine the shooting region (left_border, right_border) for the path."""
+        # Early validation
+        if len(pp_intfs) <= 1:
+            return (0, 0)
+            
+        # Validate that pp_intfs is a subset of intfs
+        assert str(list(dict.fromkeys(pp_intfs)))[1:-1] in str(intfs)[1:-1], f"Invalid interface indices: {intfs, pp_intfs}"
+            
+        interfaces = np.array(intfs)
+        
+        # Use cached turn information if available
+        if self._cached_turn_info is None:
+            start_info, end_info, valid = self.check_turns(interfaces)
+            self._cached_turn_info = (start_info, end_info, valid)
+        else:
+            start_info, end_info, valid = self._cached_turn_info
+            
+        if not valid:
+            return (0, 0)
+            
+        # Simplified path extraction for common cases
+        if len(intfs) <= 3:
+            return (1, len(self.phasepoints) - 2)
+        
+        # For complex cases, use optimized border detection
+        left_border, right_border, _ = self._find_borders(start_info, end_info, pp_intfs)
+        
+        # Validate path segment
+        valid_pp = self._validate_pp_segment(left_border, right_border, pp_intfs)
+        if not valid_pp:
+            return (0, 0)
+            
+        return (left_border, right_border)
+
+    def get_pp_path(self, intfs: List[float], pp_intfs: List[float]) -> Path:
+        """Extract and return the partial path segment."""
         from infretis.classes.path import Path
         
         # Early validation
         if len(pp_intfs) <= 1:
-            return None, "", (0, 0)
+            return None
             
         # Validate that pp_intfs is a subset of intfs
         assert str(list(dict.fromkeys(pp_intfs)))[1:-1] in str(intfs)[1:-1], f"Invalid interface indices: {intfs, pp_intfs, str(list(dict.fromkeys(pp_intfs)))[1:-1], str(intfs)[1:-1]}"
@@ -322,32 +422,27 @@ class StaplePath(Path):
             start_info, end_info, valid = self._cached_turn_info
             
         if not valid:
-            return None, "", (0, 0)
+            return None
             
         # Simplified path extraction for common cases
         if len(intfs) <= 3:
-            # Simple three-interface case
-            pptype = self._determine_simple_pptype(pp_intfs)
             for phasep in self.phasepoints:
                 new_path.append(phasep.copy())
-            return new_path, pptype, (1, len(self.phasepoints) - 2)
+            return new_path
         
         # For complex cases, use optimized border detection
-        left_border, right_border, pptype = self._find_borders(
-            start_info, end_info, pp_intfs)
+        left_border, right_border, _ = self._find_borders(start_info, end_info, pp_intfs)
             
         # Validate path segment
         valid_pp = self._validate_pp_segment(left_border, right_border, pp_intfs)
         if not valid_pp:
-            print("Validation failed! Cannot extract path segment.", self.ordermax, pp_intfs)
-            return None, "", (0, 0)
+            return None
             
         # Copy path segment efficiently
         for phasep in self.phasepoints[left_border-1:right_border+2]:
             new_path.append(phasep.copy())
 
-        print(f"{self.path_number}, pptype: {pptype}, sh_region: {left_border, right_border}")
-        return new_path, pptype, (left_border, right_border)
+        return new_path
     
     def _determine_simple_pptype(self, pp_intfs: List[float]) -> str:
         """Determine path type for simple three-interface case."""
@@ -533,7 +628,7 @@ class StaplePath(Path):
         new_path.path_number = self.path_number
         new_path.weights = self.weights
         new_path.sh_region = self.sh_region
-        new_path.ptype = self.ptype
+        new_path.pptype = self.pptype
         return new_path
     
     def empty_path(self, maxlen=DEFAULT_MAXLEN, **kwargs) -> StaplePath:

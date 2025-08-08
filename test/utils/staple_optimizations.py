@@ -236,7 +236,7 @@ class PathObjectPool:
         if len(self.path_pool) < self.max_size:
             path.phasepoints.clear()
             path.sh_region = None
-            path.ptype = ""
+            path.pptype = ""
             path.path_number = None
             self.path_pool.append(path)
 
@@ -255,7 +255,7 @@ def optimized_copy_path(original_path: StaplePath, use_pool: bool = True) -> Sta
     # Copy basic attributes
     new_path.maxlen = original_path.maxlen
     new_path.time_origin = original_path.time_origin
-    new_path.ptype = original_path.ptype
+    new_path.pptype = original_path.pptype
     new_path.sh_region = original_path.sh_region
     new_path.path_number = original_path.path_number
     

@@ -260,7 +260,7 @@ class TestStapleWorkflowEndToEnd:
         # Convert trajectory to serializable format
         traj_data = {
             "length": sample_staple_trajectory.length,
-            "ptype": sample_staple_trajectory.ptype,
+            "pptype": sample_staple_trajectory.pptype,
             "sh_region": sample_staple_trajectory.sh_region,
             "path_number": sample_staple_trajectory.path_number,
             "status": sample_staple_trajectory.status,
@@ -288,12 +288,12 @@ class TestStapleWorkflowEndToEnd:
             loaded_data = json.load(f)
         
         assert loaded_data["length"] == sample_staple_trajectory.length
-        assert loaded_data["ptype"] == sample_staple_trajectory.ptype
+        assert loaded_data["pptype"] == sample_staple_trajectory.pptype
         assert tuple(loaded_data["sh_region"]) == sample_staple_trajectory.sh_region  # Handle list vs tuple
         assert len(loaded_data["phasepoints"]) == sample_staple_trajectory.length
         
         # Reconstruct trajectory
-        recovered_path = StaplePath(ptype=loaded_data["ptype"])
+        recovered_path = StaplePath(pptype=loaded_data["pptype"])
         recovered_path.sh_region = tuple(loaded_data["sh_region"]) if loaded_data["sh_region"] else None
         recovered_path.path_number = loaded_data["path_number"]
         recovered_path.status = loaded_data["status"]
@@ -307,7 +307,7 @@ class TestStapleWorkflowEndToEnd:
         
         # Verify recovered path matches original
         assert recovered_path.length == sample_staple_trajectory.length
-        assert recovered_path.ptype == sample_staple_trajectory.ptype
+        assert recovered_path.pptype == sample_staple_trajectory.pptype
         assert recovered_path.sh_region == sample_staple_trajectory.sh_region
 
     def test_error_recovery_resilience(self, complete_simulation_config):

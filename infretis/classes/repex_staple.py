@@ -208,13 +208,15 @@ class REPEX_state_staple(REPEX_state):
                             "Path does not have valid turns, cannot load staple path."
                         )
                         raise ValueError(f"Path does not have valid turns. {st}, {end}, {out_traj.get_orders_array()}")
-                    if (out_traj.sh_region is None or len(out_traj.sh_region) != 2 or 
-                        out_traj.ptype is None or len(out_traj.ptype) < 3):
-                        _, pptype, sh_region = out_traj.get_pp_path(self.interfaces, self.ensembles[ens_num + 1]['interfaces'])
+                    if (out_traj.pptype is None or len(out_traj.pptype[1]) < 3):
+                        pptype = out_traj.get_pptype(self.interfaces, self.ensembles[ens_num + 1]['interfaces'])
                     else:
-                        # print(f"read st properties from traj {out_traj.path_number}: {out_traj.ordermin}-{out_traj.ordermax}, {out_traj.ptype}, {out_traj.sh_region}, {[php.order[0] for php in out_traj.phasepoints[out_traj.sh_region[0]-1:out_traj.sh_region[0]+8] + out_traj.phasepoints[out_traj.sh_region[1]-8:out_traj.sh_region[1]+2]]}") # noqa: E501
-                        pptype = out_traj.ptype
-                        sh_region = out_traj.sh_region
+                        assert out_traj.pptype[0] == ens_num + 1
+                        pptype = out_traj.pptype[1]
+                    if out_traj.sh_region[ens_num + 1] is None or len(out_traj.sh_region[ens_num + 1]) != 2:
+                        sh_region = out_traj.get_sh_region(self.interfaces, self.ensembles[ens_num + 1]['interfaces'])
+                    else:
+                        sh_region = out_traj.sh_region[ens_num + 1]
                     # print(f"{out_traj.path_number}, pptype: {pptype}, sh_region: {sh_region}")
                     self.traj_data[traj_num] = {
                         "ens_save_idx": ens_save_idx,
@@ -310,14 +312,15 @@ class REPEX_state_staple(REPEX_state):
                 pptype = str((chk_intf[0] if chk_intf[0] is not None else "") + chk_intf[2] + (chk_intf[1] if chk_intf[1] is not None else ""))
                 sh_region = (1, len(paths[i+1].phasepoints)-1)
             else:
-                _, pptype, sh_region = paths[i+1].get_pp_path(interfaces, [interfaces[max(i-1, 0)], interfaces[i], interfaces[i+1]])
+                pptype = paths[i+1].get_pptype(interfaces, self.ensembles[i + 1]['interfaces'])
+                sh_region = paths[i+1].get_sh_region(interfaces, self.ensembles[i + 1]['interfaces'])
             paths[i + 1].weights = calc_cv_vector(
                 paths[i + 1],
                 interfaces,
                 self.mc_moves,
                 cap=self.cap,
             )
-            paths[i+1].sh_region = sh_region
+            paths[i+1].sh_region[i] = sh_region
             self.add_traj(
                 ens=i,
                 traj=paths[i + 1],
@@ -337,7 +340,7 @@ class REPEX_state_staple(REPEX_state):
                 "weights": paths[i + 1].weights,
                 "frac": np.array(frac, dtype="longdouble"),
                 "ptype": str(st[1]) + pptype + str(end[1]),
-                "sh_region": sh_region
+                "sh_region": paths[i+1].sh_region
             }
         # add minus path:
         paths[0].weights = (1.0,)
@@ -357,8 +360,7 @@ class REPEX_state_staple(REPEX_state):
             "weights": paths[0].weights,
             "adress": paths[0].adress,
             "frac": np.array(frac, dtype="longdouble"),
-            "ptype": str((chk_intf0[0] if chk_intf0[0] is not None else "") + chk_intf0[2] + (chk_intf0[1] if chk_intf0[1] is not None else "")),
-            "sh_region": (1, len(paths[0].phasepoints) - 1)
+            "pptype": str((chk_intf0[0] if chk_intf0[0] is not None else "") + chk_intf0[2] + (chk_intf0[1] if chk_intf0[1] is not None else "")),
         }
 
     def initiate_ensembles(self):

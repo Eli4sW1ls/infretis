@@ -101,8 +101,8 @@ class EngineBase(metaclass=ABCMeta):
                 status = "Could not add for unknown reason"
             success = False
             stop = True
-        # print(f"is staple path: {isinstance(path, StaplePath)}, ptype: {path.ptype if isinstance(path, StaplePath) else 'N/A'}")
-        if isinstance(path, StaplePath) and path.ptype == "ext":
+        # print(f"is staple path: {isinstance(path, StaplePath)}, pptype: {path.pptype if isinstance(path, StaplePath) else 'N/A'}")
+        if isinstance(path, StaplePath) and path.pptype == "ext":
             # print(f"staple ext {phase_point.order[0]}, interfaces: {left}, {right}")
             interfaces_array = np.array(interfaces)
             op_loc = path.phasepoints[1].order[0]

@@ -99,7 +99,7 @@ class TestStapleWorkflowPractical:
             },
             "trajectory": {
                 "length": sample_staple_trajectory.length,
-                "ptype": sample_staple_trajectory.ptype,
+                "pptype": sample_staple_trajectory.pptype,
                 "sh_region": list(sample_staple_trajectory.sh_region) if sample_staple_trajectory.sh_region else None,
                 "path_number": sample_staple_trajectory.path_number,
                 "status": sample_staple_trajectory.status
@@ -135,7 +135,7 @@ class TestStapleWorkflowPractical:
         # Validate trajectory data
         traj_info = loaded_data["trajectory"]
         assert traj_info["length"] == sample_staple_trajectory.length
-        assert traj_info["ptype"] == sample_staple_trajectory.ptype
+        assert traj_info["pptype"] == sample_staple_trajectory.pptype
         
         # Handle tuple/list conversion for sh_region
         if sample_staple_trajectory.sh_region:
