@@ -4,6 +4,7 @@ import os
 import sys
 import time
 from datetime import datetime
+import traceback
 
 import numpy as np
 import tomli_w
@@ -29,33 +30,117 @@ class REPEX_state_staple(REPEX_state):
         super().__init__(config, minus=True)
 
     # TODO: add infinite swap functionality
-    @property
-    def prob(self):
-        """Calculate the P matrix. For REPPTIS there is no swap,
+    # @property
+    # def prob(self):
+    #     """Calculate the P matrix. For REPPTIS there is no swap,
 
-        so prob for a path in 1 ensemble is 100% and zero otherwise.
+    #     so prob for a path in 1 ensemble is 100% and zero otherwise.
 
-        For RETIS this initiates a permanent calc."""
-        prop = np.identity(self.n)
-        prop[-1,-1] = 0.
-        self._last_prob = prop.copy()
-        return prop*(1-np.array(self._locks))
+    #     For RETIS this initiates a permanent calc."""
+    #     prop = np.identity(self.n)
+    #     prop[-1,-1] = 0.
+    #     self._last_prob = prop.copy()
+    #     return prop*(1-np.array(self._locks))
 
-    def add_traj(self, ens, traj, valid, count=True, n=0):
-        """Add traj to state and calculate P matrix."""
-        valid = np.zeros(self.n)
-        valid[ens+1] = 1.
-        ens += self._offset
-        assert valid[ens] != 0
-        # invalidate last prob
-        self._last_prob = None
-        self._trajs[ens] = traj
-        self.state[ens, :] = valid
-        self.unlock(ens)
+    # def add_traj(self, ens, traj, valid, count=True, n=0):
+    #     """Add traj to state and calculate P matrix."""
+    #     valid = np.zeros(self.n)
+    #     valid[ens+1] = 1.
+    #     ens += self._offset
+    #     assert valid[ens] != 0
+    #     # invalidate last prob
+    #     self._last_prob = None
+    #     self._trajs[ens] = traj
+    #     self.state[ens, :] = valid
+    #     self.unlock(ens)
 
-        # Calculate P matrix
-        self.prob
+    #     # Calculate P matrix
+    #     self.prob
 
+    def inf_retis(self, input_mat, locks):
+        """Permanent calculator with robust fallback for complex matrices."""
+        # Drop locked rows and columns
+        bool_locks = locks == 1
+        # get non_locked minus interfaces
+        offset = self._offset - sum(bool_locks[: self._offset])
+        # make insert list
+        i = 0
+        insert_list = []
+        for lock in bool_locks:
+            if lock:
+                insert_list.append(i)
+            else:
+                i += 1
+
+        # Drop locked rows and columns
+        non_locked = input_mat[~bool_locks, :][:, ~bool_locks]
+
+        # Check if this is a simple permutation matrix (identity-like)
+        is_permutation = (
+            np.all(non_locked.sum(axis=1) == 1)
+            and np.all(non_locked.sum(axis=0) == 1)
+            and np.all((non_locked == 0) | (non_locked == 1))
+        )
+
+        if is_permutation:
+            # For permutation matrices, the probability matrix is the same
+            out = non_locked.astype("longdouble")
+        elif len(non_locked) <= 12:
+            # Use permanent method for small to medium matrices
+            print(f"Using permanent method for {len(non_locked)}x{len(non_locked)} matrix")
+            out = self.permanent_prob(non_locked)
+        else:
+            # For large matrices, use random approximation
+            print(f"Using random approximation for {len(non_locked)}x{len(non_locked)} matrix")
+            out = self.random_prob(non_locked)
+
+        # Validate the result
+        row_sums = out.sum(axis=1)
+        col_sums = out.sum(axis=0)
+        
+        # If we have invalid sums, try to repair
+        if not np.allclose(row_sums, 1) or not np.allclose(col_sums, 1):
+            print("WARNING: Matrix is not doubly stochastic, attempting repair...")
+            
+            # Normalize rows first
+            for i in range(len(out)):
+                if row_sums[i] > 0:
+                    out[i, :] /= row_sums[i]
+                else:
+                    # For zero rows, distribute uniformly over support
+                    support = np.where(non_locked[i, :] > 0)[0]
+                    if len(support) > 0:
+                        out[i, support] = 1.0 / len(support)
+            
+            # Check column normalization
+            col_sums = out.sum(axis=0)
+            if not np.allclose(col_sums, 1):
+                # Use Sinkhorn-like iteration to make doubly stochastic
+                for _ in range(100):  # max iterations
+                    # Normalize rows
+                    row_sums = out.sum(axis=1)
+                    out = out / row_sums[:, np.newaxis]
+                    
+                    # Normalize columns
+                    col_sums = out.sum(axis=0)
+                    out = out / col_sums[np.newaxis, :]
+                    
+                    # Check convergence
+                    if (np.allclose(out.sum(axis=1), 1) and 
+                        np.allclose(out.sum(axis=0), 1)):
+                        break
+
+        # Final validation
+        assert np.allclose(out.sum(axis=1), 1), f"Row sums: {out.sum(axis=1)}"
+        assert np.allclose(out.sum(axis=0), 1), f"Col sums: {out.sum(axis=0)}"
+
+        # reinsert zeroes for the locked ensembles
+        final_out_rows = np.insert(out, insert_list, 0, axis=0)
+
+        # reinsert zeroes for the locked trajectories
+        final_out = np.insert(final_out_rows, insert_list, 0, axis=1)
+
+        return final_out
     def print_shooted(self, md_items, pn_news):
         """Print shooted."""
         moves = md_items["moves"]
@@ -314,6 +399,9 @@ class REPEX_state_staple(REPEX_state):
             else:
                 pptype = paths[i+1].get_pptype(interfaces, self.ensembles[i + 1]['interfaces'])
                 sh_region = paths[i+1].get_sh_region(interfaces, self.ensembles[i + 1]['interfaces'])
+            
+            paths[i + 1].pptype = (i + 1, pptype)
+            paths[i + 1].sh_region[i+1] = sh_region
             paths[i + 1].weights = calc_cv_vector(
                 paths[i + 1],
                 interfaces,
@@ -360,7 +448,7 @@ class REPEX_state_staple(REPEX_state):
             "weights": paths[0].weights,
             "adress": paths[0].adress,
             "frac": np.array(frac, dtype="longdouble"),
-            "pptype": str((chk_intf0[0] if chk_intf0[0] is not None else "") + chk_intf0[2] + (chk_intf0[1] if chk_intf0[1] is not None else "")),
+            "ptype": str((chk_intf0[0] if chk_intf0[0] is not None else "") + chk_intf0[2] + (chk_intf0[1] if chk_intf0[1] is not None else "")),
         }
 
     def initiate_ensembles(self):

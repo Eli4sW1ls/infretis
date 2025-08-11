@@ -28,16 +28,16 @@ logger.addHandler(logging.NullHandler())
 
 class StaplePath(Path):
     """Path class that supports turns and restricted shooting point selection."""
-    
-    def __init__(self, maxlen: int = DEFAULT_MAXLEN, time_origin: int = 0, pptype: str = ""):
+
+    def __init__(self, maxlen: int = DEFAULT_MAXLEN, time_origin: int = 0, sh_region: Optional[dict[int, Tuple[int, int]]] = None, pptype: Optional[Tuple[int, str]] = None):
         """Initialize a turn path."""
         super().__init__(maxlen, time_origin)
         self._cached_orders = None
         self._cached_orders_version = 0
         self._path_version = 0
         self._cached_turn_info = None  # Cache for turn detection results
-        self.sh_region: dict[int, Tuple[int, int]] = {}  # Indices where turns occur
-        self.pptype: Optional[Tuple[int, str]] = None  # Type of each phase point
+        self.sh_region: Optional[dict[int, Tuple[int, int]]] = sh_region if sh_region is not None else {}  # Indices where turns occur
+        self.pptype: Optional[Tuple[int, str]] = pptype  # Type of each phase point
 
     def _invalidate_cache(self):
         """Invalidate cached data when path changes."""
@@ -284,8 +284,8 @@ class StaplePath(Path):
 
     def get_shooting_point(self, rgen) -> Tuple[System, int]:
         """Shooting point selection with bounds checking."""
-        
-        if len(self.sh_region) != 1:
+
+        if len(self.sh_region) == 0:
             logger.warning("No valid shooting region defined, cannot select a shooting point.")
             raise ValueError("Shooting region is not defined.")
             
@@ -329,7 +329,26 @@ class StaplePath(Path):
         
         # For complex cases, use optimized border detection
         # _, _, pptype = self._find_borders(start_info, end_info, pp_intfs)
-        if start_info[1] < end_info[1]:
+        if pp_intfs[0] == pp_intfs[1] or start_info[1] == end_info[1]:
+            if start_info[1] == 0:
+                if self.ordermax[0] > pp_intfs[2]:
+                    pptype = "LMR"
+                elif pp_intfs[1] <= self.ordermax[0] < pp_intfs[2]:
+                    pptype = "LML"
+                else:
+                    pptype = "***"
+            elif start_info[1] == len(interfaces) - 1:
+                if self.ordermin[0] < pp_intfs[0]:     # Future-proof for if there is a B ensemble
+                    pptype = "RML"
+                elif pp_intfs[0] < self.ordermin[0] <= pp_intfs[1]:
+                    pptype = "RMR"
+                else:
+                    pptype = "***"
+            elif end_info[1] == 0:
+                pptype = "RML"
+            else:
+                pptype = "***"
+        elif start_info[1] < end_info[1]:
             if interfaces[start_info[1]] < pp_intfs[1] < interfaces[end_info[1]]:
                 pptype = "LMR"
             elif interfaces[end_info[1]] == pp_intfs[1]:
@@ -345,19 +364,6 @@ class StaplePath(Path):
                 pptype = "LML"
             elif interfaces[end_info[1]] == pp_intfs[1]:
                 pptype = "RMR"
-            else:
-                pptype = "***"
-        elif pp_intfs[0] == pp_intfs[1]:
-            if start_info[1] == 0:
-                if self.ordermax[0] > pp_intfs[2]:
-                    pptype = "LMR"
-                else:
-                    pptype = "LML"
-            elif start_info[1] == len(interfaces) - 1:
-                if self.ordermin < pp_intfs[0]:     # Future-proof for if there is a B ensemble
-                    pptype = "RML"
-                else:
-                    pptype = "RMR"
             else:
                 pptype = "***"
         else:

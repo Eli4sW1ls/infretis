@@ -141,11 +141,11 @@ def calc_cv_vector(
     if isinstance(path, StaplePath):
         staple_ha = 1.
         if path.pptype[1] in ["LML", "RMR"]:
-            if 2 <= path.pptype[0] <= len(interfaces) - 3:
+            if 2 <= path.pptype[0] <= len(interfaces) - 2:
                 staple_ha = 0.5
             elif path.pptype[0] == 1 and path.pptype[1] == "RMR":
                 staple_ha = 0.5
-            elif path.pptype[0] == len(interfaces) - 2 and path.pptype[1] == "LML":
+            elif path.pptype[0] == len(interfaces) - 1 and path.pptype[1] == "LML":
                 staple_ha = 0.5
 
     for idx, intf_i in enumerate(interfaces[:-1]):
@@ -153,8 +153,12 @@ def calc_cv_vector(
             intf_cap = cap if cap is not None else interfaces[-1]
             intfs = [interfaces[0], intf_i, intf_cap]
             cv.append(compute_weight(path, intfs, moves[idx + 1]))
-        elif "st_" in moves[idx + 1]:
-            cv.append(staple_ha)
+        elif isinstance(path, StaplePath):
+            if path.get_pptype(interfaces, [interfaces[max(0, idx - 1)], interfaces[idx], interfaces[idx + 1]]) != "***":
+                print(f"pptype: {path.get_pptype(interfaces, [interfaces[max(0, idx - 1)], interfaces[idx], interfaces[idx + 1]])} in {idx}, {path.ordermax}, {path.ordermin}")
+                cv.append(staple_ha)
+            else:
+                cv.append(0.0)
         else:
             cv.append(1.0 if intf_i <= path_max else 0.0)
     cv.append(0.0)
@@ -786,13 +790,15 @@ def prepare_shooting_point(
             - The change in kinetic energy when modifying the velocities.
 
     """
-    if int(ens_set["ens_name"]) == 0:
+    if int(ens_set["ens_name"]) == 0 or isinstance(path, Path):
         shooting_point, idx = path.get_shooting_point(rgen)
     else:
+        sh_region_copy = path.sh_region.copy()
         for i in list(path.sh_region.keys()):
             if int(ens_set["ens_name"]) != int(i):
                 path.sh_region.pop(i)
         shooting_point, idx = path.get_shooting_point(rgen)
+        path.sh_region = sh_region_copy
     orderp = shooting_point.order
     shpt_copy = shooting_point.copy()
     logger.info("Shooting from order parameter/index: %f, %d", orderp[0], idx)
@@ -1906,6 +1912,7 @@ def staple_sh(
         return False, trial_path, trial_path.status
     
     # Start extending the path:
+    trial_path.pptype = "ext"
     success, trial_path, _ = staple_extender(
         trial_path, pptype, engine, ens_set
     )
@@ -1916,7 +1923,7 @@ def staple_sh(
         shooting_point.order[0],
         idx,
         trial_path.length,
-        pptype,
+        (0, pptype),
         trial_path.sh_region,
     )
     if not success:
@@ -2164,7 +2171,7 @@ def staple_swap_zero(
         engine1.propagate(path_tmp, ens_set1, system, reverse=False)
         # Ok, now we need to just add the SECOND LAST point from [0^-] as
         # the first point for the path:
-        path1 = path_tmp.empty_path(maxlen=maxlen1)
+        path1 = path_tmp.empty_path(maxlen=maxlen1, pptype="ext")
         # phase_point = path_ensemble0.last_path.phasepoints[-2].copy()
         phase_point = path_old0.phasepoints[-2].copy()
         logger.info("Add second last point: %s", phase_point.order)

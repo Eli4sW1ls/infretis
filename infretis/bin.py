@@ -38,17 +38,22 @@ def internalrun(input_file, enable_profiling=False):
 
     infretis can now be called directly without argparse.
     """
+    print(f"🔧 Starting internalrun with input: {input_file}")
+    
     if os.environ.get("INFRETIS_DEBUG", "false").lower() == "true":
         enable_debugging()
+        print("🐛 Debug mode enabled - breakpoints should work now!")
     
     # Note: Comprehensive profiling available in profiling.py module
     if enable_profiling:
         print("📊 Basic profiling requested - use profiling.py module for detailed analysis")
     
+    print("🚀 About to call setup_config - set breakpoint here!")
     try:
         config = setup_config(input_file)
         if config is None:
             return
+        print("📋 Configuration loaded, starting scheduler...")
         scheduler(config)
     finally:
         if enable_profiling:
