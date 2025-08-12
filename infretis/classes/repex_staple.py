@@ -296,12 +296,12 @@ class REPEX_state_staple(REPEX_state):
                     if (out_traj.pptype is None or len(out_traj.pptype[1]) < 3):
                         pptype = out_traj.get_pptype(self.interfaces, self.ensembles[ens_num + 1]['interfaces'])
                     else:
-                        assert out_traj.pptype[0] == ens_num + 1
+                        assert out_traj.pptype[0] == ens_num
                         pptype = out_traj.pptype[1]
-                    if out_traj.sh_region[ens_num + 1] is None or len(out_traj.sh_region[ens_num + 1]) != 2:
+                    if ens_num not in out_traj.sh_region.keys() or len(out_traj.sh_region[ens_num]) != 2:
                         sh_region = out_traj.get_sh_region(self.interfaces, self.ensembles[ens_num + 1]['interfaces'])
                     else:
-                        sh_region = out_traj.sh_region[ens_num + 1]
+                        sh_region = out_traj.sh_region[ens_num]
                     # print(f"{out_traj.path_number}, pptype: {pptype}, sh_region: {sh_region}")
                     self.traj_data[traj_num] = {
                         "ens_save_idx": ens_save_idx,
@@ -400,15 +400,14 @@ class REPEX_state_staple(REPEX_state):
                 pptype = paths[i+1].get_pptype(interfaces, self.ensembles[i + 1]['interfaces'])
                 sh_region = paths[i+1].get_sh_region(interfaces, self.ensembles[i + 1]['interfaces'])
             
-            paths[i + 1].pptype = (i + 1, pptype)
-            paths[i + 1].sh_region[i+1] = sh_region
+            paths[i + 1].pptype = (i, pptype)
+            paths[i + 1].sh_region[i] = sh_region
             paths[i + 1].weights = calc_cv_vector(
                 paths[i + 1],
                 interfaces,
                 self.mc_moves,
                 cap=self.cap,
             )
-            paths[i+1].sh_region[i] = sh_region
             self.add_traj(
                 ens=i,
                 traj=paths[i + 1],
@@ -488,6 +487,159 @@ class REPEX_state_staple(REPEX_state):
 
         self.ensembles = pensembles
 
+    def sort_trajstate(self):
+        """Sort trajs and calculate P matrix.
+        
+        Enhanced version that can handle deadlocks by detecting cycles
+        and using a more sophisticated swap strategy when needed.
+        """
+        if self.toinitiate != -1:
+            self._last_prob = None
+            self.prob
+            return
+            
+        needstomove = [
+            self.state[idx][:-1][idx] == 0 for idx in range(self.n - 1)
+        ]
+        
+        # Track attempts to detect infinite loops
+        attempt_count = 0
+        max_attempts = self.n * 2  # Reasonable limit
+        previous_states = []
+        
+        while True in needstomove and self.toinitiate == -1:
+            attempt_count += 1
+            
+            # Check for infinite loop by comparing current state
+            current_state_key = tuple(needstomove)
+            if current_state_key in previous_states:
+                logger.warning("Detected potential infinite loop in sort_trajstate, using advanced resolution.")
+                self._resolve_deadlock()
+                break
+            previous_states.append(current_state_key)
+            
+            # Safety check to prevent runaway loops
+            if attempt_count > max_attempts:
+                logger.warning(f"sort_trajstate exceeded {max_attempts} attempts, using advanced resolution.")
+                self._resolve_deadlock()
+                break
+            
+            # Original algorithm: try to fix the first problematic ensemble
+            ens_idx = list(needstomove).index(True)
+            locks = self.locked_paths()
+            
+            try:
+                zero_idx = list(self.state[ens_idx][1:-1]).index(0) + 1
+                avail = [1 if i != 0 else 0 for i in self.state[:, zero_idx]]
+                avail = [
+                    j if self._trajs[i].path_number not in locks else 0
+                    for i, j in enumerate(avail[:-1])
+                ]
+                
+                if 1 not in avail:
+                    # No trajectory is available for this ensemble - deadlock
+                    logger.warning("No available trajectory found for simple swap, using advanced resolution.")
+                    self._resolve_deadlock()
+                    break
+                
+                trj_idx = avail.index(1)
+                self.swap(ens_idx, trj_idx)
+                
+            except (ValueError, IndexError) as e:
+                # Error in finding swap candidate - use advanced resolution
+                logger.warning(f"Error in simple swap resolution ({e}), using advanced resolution.")
+                self._resolve_deadlock()
+                break
+                
+            # Recalculate which ensembles still need fixing
+            needstomove = [
+                self.state[idx][:-1][idx] == 0 for idx in range(self.n - 1)
+            ]
+        
+        self._last_prob = None
+        self.prob
+
+    def _resolve_deadlock(self):
+        """Advanced deadlock resolution using backtracking algorithm."""
+        logger.info("Resolving deadlock using advanced permutation algorithm.")
+        
+        # Build a map of which trajectories can go into which ensembles
+        n_unlocked = self.n - 1
+        possible_swaps = {i: [] for i in range(n_unlocked)}
+        unlocked_paths = [
+            (i, traj.path_number)
+            for i, traj in enumerate(self._trajs[:-1])
+            if traj.path_number not in self.locked_paths()
+        ]
+        unlocked_indices = [item[0] for item in unlocked_paths]
+
+        for ens_idx in range(n_unlocked):
+            for traj_idx in unlocked_indices:
+                if self.state[traj_idx, ens_idx] != 0:
+                    possible_swaps[ens_idx].append(traj_idx)
+
+        # Find a valid assignment using backtracking
+        assignment = [-1] * n_unlocked
+        used_trajectories = [False] * n_unlocked
+
+        def find_valid_assignment(ens_idx):
+            """Recursively find a valid trajectory for each ensemble."""
+            if ens_idx == n_unlocked:
+                return True  # All ensembles have been assigned a trajectory
+
+            for traj_idx in possible_swaps[ens_idx]:
+                if not used_trajectories[traj_idx]:
+                    assignment[ens_idx] = traj_idx
+                    used_trajectories[traj_idx] = True
+                    if find_valid_assignment(ens_idx + 1):
+                        return True
+                    # Backtrack
+                    used_trajectories[traj_idx] = False
+                    assignment[ens_idx] = -1
+            return False
+
+        if find_valid_assignment(0):
+            # Apply the solution using a series of swaps to maintain consistency
+            self._apply_permutation_via_swaps(assignment)
+            logger.info("Successfully resolved deadlock.")
+        else:
+            logger.error("FATAL: Could not find a valid permutation of trajectories.")
+            logger.error("This implies a deadlock that cannot be resolved.")
+            logger.error("Check your ensemble definitions and trajectory generation.")
+            # Continue anyway to prevent hard crash
+    
+    def _apply_permutation_via_swaps(self, assignment):
+        """Apply the permutation using the existing swap() method to maintain consistency."""
+        n_unlocked = self.n - 1
+        
+        # Create a mapping of where each trajectory should go
+        current_positions = list(range(n_unlocked))
+        target_positions = assignment.copy()
+        
+        # Perform a series of swaps to achieve the target permutation
+        # This is essentially a cycle decomposition approach
+        visited = [False] * n_unlocked
+        
+        for start_idx in range(n_unlocked):
+            if visited[start_idx]:
+                continue
+                
+            # Follow the cycle starting from start_idx
+            current_idx = start_idx
+            cycle = []
+            
+            while not visited[current_idx]:
+                visited[current_idx] = True
+                cycle.append(current_idx)
+                # Find where the trajectory at current_idx should go
+                target_idx = target_positions[current_idx]
+                current_idx = target_idx
+                
+            # Apply swaps for this cycle
+            if len(cycle) > 1:
+                # Perform swaps to rotate the cycle
+                for i in range(len(cycle) - 1):
+                    self.swap(cycle[i], cycle[i + 1])
 
 def write_to_pathens(state, pn_archive):
     """Write data to infretis_data.txt."""

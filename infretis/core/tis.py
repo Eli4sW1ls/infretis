@@ -795,7 +795,7 @@ def prepare_shooting_point(
     else:
         sh_region_copy = path.sh_region.copy()
         for i in list(path.sh_region.keys()):
-            if int(ens_set["ens_name"]) != int(i):
+            if int(ens_set["ens_name"]-1) != int(i):
                 path.sh_region.pop(i)
         shooting_point, idx = path.get_shooting_point(rgen)
         path.sh_region = sh_region_copy
@@ -1766,7 +1766,7 @@ def staple_sh(
     sh_region = path.sh_region.get(int(ens_set["ens_name"]), None)
     if sh_region is None:
         sh_region = path.get_sh_region(ens_set["all_intfs"], intfs_pp)
-        path.sh_region[int(ens_set["ens_name"])] = sh_region
+        path.sh_region[int(ens_set["ens_name"])-1] = sh_region
     # the trial path we will generate
     trial_path = path.empty_path(maxlen=ens_set["tis_set"]["maxlength"])
     if shooting_point is None:
@@ -1917,7 +1917,7 @@ def staple_sh(
         trial_path, pptype, engine, ens_set
     )
     trial_path.status = "ACC" if success else "EXT"
-    trial_path.pptype = (int(ens_set["ens_name"]), pptype)
+    trial_path.pptype = (int(ens_set["ens_name"])-1, pptype)
     trial_path.generated = (
         "st_sh",
         shooting_point.order[0],
@@ -2187,7 +2187,7 @@ def staple_swap_zero(
             path1, pptype, engine1, ens_set1
         )
         # print("length after extending:", path1.length)
-        path1.pptype = (1, pptype)
+        path1.pptype = (0, pptype)
     else:
         path1 = path_tmp
         path1.append(system)
@@ -2323,7 +2323,7 @@ def staple_extender(
                 full_staple.status = "BTX"
                 success = False
             # print("length after pasting:", full_staple.length, source_seg.length+turn_seg.length - 2)
-            full_staple.sh_region[int(ens_set["ens_name"])] = (turn_seg.length - 1, full_staple.length - 2)
+            full_staple.sh_region[int(ens_set["ens_name"])-1] = (turn_seg.length - 1, full_staple.length - 2)
         else:
             full_staple = source_seg.copy()
             # print("Turn segment:", [php.order[0] for php in turn_seg.phasepoints[:2]], [php.order[0] for php in source_seg.phasepoints[-2:]])
@@ -2336,7 +2336,7 @@ def staple_extender(
                     full_staple.status = "FTX"
                     success = False
             # print("length after pasting:", full_staple.length, source_seg.length+turn_seg.length - 2)
-            full_staple.sh_region[int(ens_set["ens_name"])] = (1, full_staple.length - 2)
+            full_staple.sh_region[int(ens_set["ens_name"])-1] = (1, full_staple.length - 2)
             full_staple.weight = 2.0
     else:
         bw_turn = source_seg.empty_path(
@@ -2394,7 +2394,7 @@ def staple_extender(
                 full_staple.status = "FTX"
                 success = False
         # print("length after FW pasting:", full_staple.length, source_seg.length+bw_turn.length + fw_turn.length - 4)
-        full_staple.sh_region[int(ens_set["ens_name"])] = (bw_turn.length - 1, bw_turn.length + source_seg.length - 4)
+        full_staple.sh_region[int(ens_set["ens_name"])-1] = (bw_turn.length - 1, bw_turn.length + source_seg.length - 4)
         full_staple.weight = 1.0
         
     # Check if the length of the full staple exceeds the maximum allowed length
