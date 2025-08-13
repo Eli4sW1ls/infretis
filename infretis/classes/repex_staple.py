@@ -9,6 +9,7 @@ import traceback
 import numpy as np
 import tomli_w
 from numpy.random import default_rng
+import matplotlib.pyplot as plt
 
 from infretis.classes.repex import REPEX_state, spawn_rng
 from infretis.classes.engines.factory import assign_engines
@@ -28,6 +29,9 @@ class REPEX_state_staple(REPEX_state):
     def __init__(self, config, minus=False):
         """Initiate REPEX given confic dict from *toml file."""
         super().__init__(config, minus=True)
+        
+        # Enable visual validation by default (can be disabled in config)
+        self.visual_validation = config.get("output", {}).get("visual_validation", True)
 
     # TODO: add infinite swap functionality
     # @property
@@ -58,7 +62,7 @@ class REPEX_state_staple(REPEX_state):
     #     self.prob
 
     def inf_retis(self, input_mat, locks):
-        """Permanent calculator with robust fallback for complex matrices."""
+        """Permanent calculator with robust fallback and blocking optimization."""
         # Drop locked rows and columns
         bool_locks = locks == 1
         # get non_locked minus interfaces
@@ -85,14 +89,23 @@ class REPEX_state_staple(REPEX_state):
         if is_permutation:
             # For permutation matrices, the probability matrix is the same
             out = non_locked.astype("longdouble")
-        elif len(non_locked) <= 12:
-            # Use permanent method for small to medium matrices
-            print(f"Using permanent method for {len(non_locked)}x{len(non_locked)} matrix")
-            out = self.permanent_prob(non_locked)
         else:
-            # For large matrices, use random approximation
-            print(f"Using random approximation for {len(non_locked)}x{len(non_locked)} matrix")
-            out = self.random_prob(non_locked)
+            # Try the advanced blocking algorithm from repex.py
+            try:
+                if len(non_locked) >= 8:
+                    out = self._inf_retis_with_blocking(non_locked, offset)
+                    # print(f"Successfully used blocking algorithm for {len(non_locked)}x{len(non_locked)} matrix")
+                else:
+                    raise Exception("Matrix too small for blocking algorithm")
+            except Exception as e:
+                # print(f"Blocking algorithm failed ({e}), using fallback methods...")
+                # Fall back to original simple method
+                if len(non_locked) <= 12:
+                    # print(f"Using permanent method for {len(non_locked)}x{len(non_locked)} matrix")
+                    out = self.permanent_prob(non_locked)
+                else:
+                    print(f"Using random approximation for {len(non_locked)}x{len(non_locked)} matrix")
+                    out = self.random_prob(non_locked)
 
         # Validate the result
         row_sums = out.sum(axis=1)
@@ -141,6 +154,133 @@ class REPEX_state_staple(REPEX_state):
         final_out = np.insert(final_out_rows, insert_list, 0, axis=1)
 
         return final_out
+
+    def _inf_retis_with_blocking(self, non_locked, offset):
+        """Advanced inf_retis algorithm with blocking from repex.py."""
+        # Sort based on the index of the last non-zero values in the rows
+        # argmax(a>0) gives back the first column index that is nonzero
+        # so looping over the columns backwards and multiplying by -1
+        # gives the right ordering
+        minus_idx = np.argsort(np.argmax(non_locked[:offset] > 0, axis=1))
+        pos_idx = (
+            np.argsort(-1 * np.argmax(non_locked[offset:, ::-1] > 0, axis=1))
+            + offset
+        )
+
+        sort_idx = np.append(minus_idx, pos_idx)
+        sorted_non_locked = non_locked[sort_idx]
+
+        # check if all trajectories have equal weights
+        sorted_non_locked_T = sorted_non_locked.T
+        # Check the minus interfaces
+        equal_minus = np.all(
+            sorted_non_locked_T[
+                np.where(
+                    sorted_non_locked_T[:, :offset]
+                    != sorted_non_locked_T[offset - 1, :offset]
+                )
+            ]
+            == 0
+        )
+        # check the positive interfaces
+        if len(sorted_non_locked_T) <= offset:
+            equal_pos = True
+        else:
+            equal_pos = np.all(
+                sorted_non_locked_T[:, offset:][
+                    np.where(
+                        sorted_non_locked_T[:, offset:]
+                        != sorted_non_locked_T[offset, offset:]
+                    )
+                ]
+                == 0
+            )
+
+        equal = equal_minus and equal_pos
+
+        out = np.zeros(shape=sorted_non_locked.shape, dtype="longdouble")
+        if equal:
+            # All trajectories have equal weights, run fast algorithm
+            print(f"Using fast algorithm for equal-weight {len(sorted_non_locked)}x{len(sorted_non_locked)} matrix")
+            # minus move should be run backwards
+            out[:offset, ::-1] = self.quick_prob(
+                sorted_non_locked[:offset, ::-1]
+            )
+            if offset < len(out):
+                # Catch only minus ens available
+                out[offset:] = self.quick_prob(sorted_non_locked[offset:])
+        else:
+            # Use blocking strategy
+            print(f"Using blocking algorithm for complex {len(sorted_non_locked)}x{len(sorted_non_locked)} matrix")
+            blocks = self.find_blocks(sorted_non_locked, offset=offset)
+            for start, stop, direction in blocks:
+                if direction == -1:
+                    cstart, cstop = stop - 1, start - 1
+                    if cstop < 0:
+                        cstop = None
+                else:
+                    cstart, cstop = start, stop
+                subarr = sorted_non_locked[start:stop, cstart:cstop:direction]
+                subarr_T = subarr.T
+                if len(subarr) == 1:
+                    out[start:stop, start:stop] = 1
+                elif np.all(subarr_T[np.where(subarr_T != subarr_T[0])] == 0):
+                    # Either the same weight as the last one or zero
+                    temp = self.quick_prob(subarr)
+                    out[start:stop, cstart:cstop:direction] = temp
+                elif len(subarr) <= 12:
+                    # We can run this subsecond
+                    temp = self.permanent_prob(subarr)
+                    out[start:stop, cstart:cstop:direction] = temp
+                else:
+                    self._random_count += 1
+                    print(
+                        f"random #{self._random_count}, "
+                        f"dims = {len(subarr)}"
+                    )
+                    # do n random parallel samples
+                    temp = self.random_prob(subarr)
+                    out[start:stop, cstart:cstop:direction] = temp
+
+        out[sort_idx] = out.copy()  # COPY REQUIRED TO NOT BREAK STATE!!!
+        return out
+
+    def find_blocks(self, arr, offset):
+        """Find blocks in a W matrix."""
+        if len(arr) == 1:
+            return [(0, 1, 1)]
+        # Assume no zeroes on the diagonal or lower triangle
+        temp_arr = arr.copy()
+        # for counting minus blocks
+        temp_arr[:offset, :offset] = arr[:offset, :offset].T
+        temp_arr[offset:, :offset] = 1  # add ones to the lower triangle
+        non_zero = np.count_nonzero(temp_arr, axis=1)
+        blocks = []
+        start = 0
+        for i, e in enumerate(non_zero):
+            if e == i + 1:
+                direction = -1 if start < offset else 1
+                blocks.append((start, e, direction))
+                start = e
+        return blocks
+
+    def quick_prob(self, arr):
+        """Quick P matrix calculation for specific W matrix."""
+        total_traj_prob = np.ones(shape=arr.shape[0], dtype="longdouble")
+        out_mat = np.zeros(shape=arr.shape, dtype="longdouble")
+        working_mat = np.where(arr != 0, 1, 0)  # convert non-zero numbers to 1
+
+        for i, column in enumerate(working_mat.T[::-1]):
+            ens = column * total_traj_prob
+            s = ens.sum()
+            if s != 0:
+                ens /= s
+            out_mat[:, -(i + 1)] = ens
+            total_traj_prob -= ens
+            # force negative values to 0
+            total_traj_prob[np.where(total_traj_prob < 0)] = 0
+        return out_mat
+    
     def print_shooted(self, md_items, pn_news):
         """Print shooted."""
         moves = md_items["moves"]
@@ -172,6 +312,155 @@ class REPEX_state_staple(REPEX_state):
             " ".join([f"00{i}: {j}," for i, j in enumerate(ens_num)]) + "\n"
         )
         self.print_state()
+
+    def plot_path_validation(self, traj, traj_data, ens_num, move_type="sh"):
+        """Plot path with validation info for visual debugging."""
+        try:
+            # Get trajectory order parameter values
+            orders = traj.get_orders_array()
+            
+            # Create figure with high DPI for clarity
+            fig, ax = plt.subplots(figsize=(12, 8), dpi=100)
+            
+            # Plot the path
+            ax.plot(range(len(orders)), orders, 'b-', linewidth=2, label='Path trajectory')
+            ax.scatter(range(len(orders)), orders, c='blue', s=20, alpha=0.6)
+            
+            # Plot interfaces
+            interfaces = self.interfaces
+            for i, interface in enumerate(interfaces):
+                color = 'red' if i == 0 else 'orange' if i == len(interfaces)-1 else 'gray'
+                linestyle = '--' if i in [0, len(interfaces)-1] else ':'
+                ax.axhline(y=interface, color=color, linestyle=linestyle, alpha=0.7, 
+                          label=f'Interface {i}: {interface:.3f}')
+            
+            # Highlight shooting region if it exists for this specific ensemble
+            if ('sh_region' in traj_data and traj_data['sh_region'] is not None and 
+                isinstance(traj_data['sh_region'], dict) and ens_num in traj_data['sh_region']):
+                
+                sh_start, sh_end = traj_data['sh_region'][ens_num]
+                if sh_start < len(orders) and sh_end < len(orders) and sh_start < sh_end:
+                    # Get the order parameter range in the shooting region
+                    sh_orders = orders[sh_start:sh_end+1]
+                    if len(sh_orders) > 0:
+                        sh_op_min = np.min(sh_orders)
+                        sh_op_max = np.max(sh_orders)
+                        
+                        # Create horizontal bands showing the shooting region's OP range
+                        ax.axhspan(sh_op_min, sh_op_max, alpha=0.2, color='green', 
+                                  label=f'Shooting region OP range [{sh_op_min:.3f}, {sh_op_max:.3f}]')
+                        
+                        # Highlight the path segment in the shooting region
+                        sh_x = range(sh_start, min(sh_end+1, len(orders)))
+                        sh_y = orders[sh_start:min(sh_end+1, len(orders))]
+                        ax.plot(sh_x, sh_y, 'g-', linewidth=4, alpha=0.7, 
+                               label=f'Shooting region path (ens {ens_num}) [{sh_start}-{sh_end}]')
+                        ax.scatter(sh_x, sh_y, c='darkgreen', s=30, alpha=0.8, zorder=4)
+                        
+                        # Mark shooting region boundaries on x-axis
+                        ax.axvline(x=sh_start, color='green', linestyle='--', alpha=0.8, linewidth=2)
+                        ax.axvline(x=sh_end, color='green', linestyle='--', alpha=0.8, linewidth=2)
+                        
+                        # Add text annotations for shooting region boundaries
+                        ax.annotate(f'Shooting start\n(step {sh_start})', 
+                                   xy=(sh_start, sh_orders[0]), xytext=(sh_start-10, sh_orders[0]+0.1),
+                                   arrowprops=dict(arrowstyle='->', color='green', alpha=0.7),
+                                   fontsize=10, color='darkgreen', ha='center')
+                        ax.annotate(f'Shooting end\n(step {sh_end})', 
+                                   xy=(sh_end, sh_orders[-1]), xytext=(sh_end+10, sh_orders[-1]+0.1),
+                                   arrowprops=dict(arrowstyle='->', color='green', alpha=0.7),
+                                   fontsize=10, color='darkgreen', ha='center')
+            
+            # Mark trajectory extremes
+            if hasattr(traj, 'ordermax') and hasattr(traj, 'ordermin'):
+                max_idx = np.argmax(orders)
+                min_idx = np.argmin(orders)
+                ax.scatter(max_idx, orders[max_idx], c='red', s=100, marker='^', 
+                          label=f'Max OP: {traj.ordermax:.3f}', zorder=5)
+                ax.scatter(min_idx, orders[min_idx], c='purple', s=100, marker='v',
+                          label=f'Min OP: {traj.ordermin:.3f}', zorder=5)
+            
+            # Set labels and title
+            ax.set_xlabel('Time step', fontsize=12)
+            ax.set_ylabel('Order parameter', fontsize=12)
+            
+            # Create detailed title with path information
+            title_parts = [
+                f"Path Validation - {move_type.upper()} move",
+                f"Path #{traj.path_number}" if hasattr(traj, 'path_number') else "New path",
+                f"Ensemble {ens_num}",
+                f"Length: {traj_data.get('length', len(orders))}",
+                f"Type: {traj_data.get('ptype', 'Unknown')}"
+            ]
+            ax.set_title('\n'.join(title_parts), fontsize=14, pad=20)
+            
+            # Add grid for better readability
+            ax.grid(True, alpha=0.3)
+            
+            # Add legend
+            ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left', fontsize=10)
+            
+            # Adjust layout to prevent legend cutoff
+            plt.tight_layout()
+            
+            # Add text box with detailed information
+            info_text = self._format_traj_info(traj_data, ens_num)
+            ax.text(0.02, 0.98, info_text, transform=ax.transAxes, fontsize=10,
+                   verticalalignment='top', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
+            
+            plt.show(block=True)  # Block execution until plot is closed
+            
+        except Exception as e:
+            logger.warning(f"Failed to plot path validation: {e}")
+            print(f"Plot error: {e}")
+
+    def _format_traj_info(self, traj_data, ens_num):
+        """Format trajectory information for display."""
+        info_lines = [
+            f"TRAJECTORY INFO:",
+            f"Original Ensemble: {ens_num}",
+            f"Path Type: {traj_data.get('ptype', 'Unknown')}",
+            f"Length: {traj_data.get('length', 'Unknown')}",
+            f"Max OP: {traj_data.get('max_op', 'Unknown'):.4f}" if isinstance(traj_data.get('max_op'), (int, float)) else f"Max OP: {traj_data.get('max_op', 'Unknown')}",
+            f"Min OP: {traj_data.get('min_op', 'Unknown'):.4f}" if isinstance(traj_data.get('min_op'), (int, float)) else f"Min OP: {traj_data.get('min_op', 'Unknown')}",
+        ]
+        
+        if ('sh_region' in traj_data and traj_data['sh_region'] is not None and
+            isinstance(traj_data['sh_region'], dict)):
+            # Display shooting region for the specific ensemble
+            if ens_num in traj_data['sh_region']:
+                info_lines.append(f"Shooting Region (ens {ens_num}): {traj_data['sh_region'][ens_num]}")
+            else:
+                info_lines.append(f"Shooting Region: No data for ensemble {ens_num}")
+                info_lines.append(f"Available ensembles: {list(traj_data['sh_region'].keys())}")
+        
+        return '\n'.join(info_lines)
+
+    def print_traj_data_detailed(self, traj_data, traj_num):
+        """Print detailed trajectory data after treat_output."""
+        print("\n" + "="*60)
+        print(f"TRAJECTORY DATA AFTER TREAT_OUTPUT - Path #{traj_num}")
+        print("="*60)
+        
+        for key, value in traj_data.items():
+            if key == 'frac':
+                print(f"  {key:>15}: {value} (shape: {value.shape if hasattr(value, 'shape') else 'N/A'})")
+            elif key == 'weights':
+                if hasattr(value, '__len__') and len(value) > 10:
+                    print(f"  {key:>15}: [first 5: {value[:5]}, ..., last 5: {value[-5:]}] (length: {len(value)})")
+                else:
+                    print(f"  {key:>15}: {value}")
+            elif key == 'adress':
+                if isinstance(value, list) and len(value) > 3:
+                    print(f"  {key:>15}: [showing first 3 of {len(value)} files]")
+                    for i, addr in enumerate(value[:3]):
+                        print(f"                   [{i}]: {addr}")
+                else:
+                    print(f"  {key:>15}: {value}")
+            else:
+                print(f"  {key:>15}: {value}")
+        
+        print("="*60)
 
     def print_state(self):
         """Print state."""
@@ -298,8 +587,10 @@ class REPEX_state_staple(REPEX_state):
                     else:
                         assert out_traj.pptype[0] == ens_num
                         pptype = out_traj.pptype[1]
+                        if 
                     if ens_num not in out_traj.sh_region.keys() or len(out_traj.sh_region[ens_num]) != 2:
                         sh_region = out_traj.get_sh_region(self.interfaces, self.ensembles[ens_num + 1]['interfaces'])
+                        out_traj.sh_region[ens_num] = sh_region
                     else:
                         sh_region = out_traj.sh_region[ens_num]
                     # print(f"{out_traj.path_number}, pptype: {pptype}, sh_region: {sh_region}")
@@ -312,7 +603,7 @@ class REPEX_state_staple(REPEX_state):
                         "weights": out_traj.weights,
                         "frac": np.zeros(self.n, dtype="longdouble"),
                         "ptype": str(st[1]) + pptype + str(end[1]),
-                        "sh_region": sh_region
+                        "sh_region": out_traj.sh_region,
                     }
                 traj_num += 1
                 if (
@@ -362,6 +653,38 @@ class REPEX_state_staple(REPEX_state):
         self.sort_trajstate()
         self.config["current"]["traj_num"] = traj_num
         self.cworker = md_items["pin"]
+        
+        # VISUAL VALIDATION: Plot and display trajectory data after shooting moves
+        if (self.visual_validation and "moves" in md_items and 
+            any(move == "sh" for move in md_items["moves"])):
+            print("\n" + "🎯 VISUAL VALIDATION AFTER SHOOTING MOVE 🎯".center(80, "="))
+            
+            # Plot each trajectory that was just processed
+            for i, ens_num in enumerate(picked.keys() if picked else []):
+                if ens_num in picked and "traj" in picked[ens_num]:
+                    out_traj = picked[ens_num]["traj"]
+                    traj_number = pn_news[i] if i < len(pn_news) else "Unknown"
+                    
+                    # Get the trajectory data
+                    if traj_number in self.traj_data:
+                        current_traj_data = self.traj_data[traj_number]
+                        
+                        # Print detailed trajectory data
+                        self.print_traj_data_detailed(current_traj_data, traj_number)
+                        
+                        # Plot the path with validation info
+                        print(f"\n📊 Plotting trajectory #{traj_number} from ensemble {ens_num}...")
+                        print(f"   Status: {md_items.get('status', 'Unknown')}")
+                        print(f"   Move type: {'sh' if 'sh' in md_items.get('moves', []) else 'other'}")
+                        print("   Close the plot window to continue...")
+                        
+                        self.plot_path_validation(out_traj, current_traj_data, ens_num+1, "sh")
+                        
+                    else:
+                        print(f"⚠️  Warning: Trajectory data for path #{traj_number} not found")
+            
+            print("=" * 80)
+        
         if self.printing():
             self.print_shooted(md_items, pn_news)
         # save for possible restart
@@ -584,6 +907,7 @@ class REPEX_state_staple(REPEX_state):
 
         def find_valid_assignment(ens_idx):
             """Recursively find a valid trajectory for each ensemble."""
+            print(self.state)
             if ens_idx == n_unlocked:
                 return True  # All ensembles have been assigned a trajectory
 
@@ -601,6 +925,7 @@ class REPEX_state_staple(REPEX_state):
         if find_valid_assignment(0):
             # Apply the solution using a series of swaps to maintain consistency
             self._apply_permutation_via_swaps(assignment)
+            print(self.state)
             logger.info("Successfully resolved deadlock.")
         else:
             logger.error("FATAL: Could not find a valid permutation of trajectories.")

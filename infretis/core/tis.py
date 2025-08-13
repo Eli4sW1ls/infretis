@@ -141,11 +141,11 @@ def calc_cv_vector(
     if isinstance(path, StaplePath):
         staple_ha = 1.
         if path.pptype[1] in ["LML", "RMR"]:
-            if 2 <= path.pptype[0] <= len(interfaces) - 2:
+            if 2 <= path.pptype[0] <= len(interfaces) - 3:
                 staple_ha = 0.5
             elif path.pptype[0] == 1 and path.pptype[1] == "RMR":
                 staple_ha = 0.5
-            elif path.pptype[0] == len(interfaces) - 1 and path.pptype[1] == "LML":
+            elif path.pptype[0] == len(interfaces) - 2 and path.pptype[1] == "LML":
                 staple_ha = 0.5
 
     for idx, intf_i in enumerate(interfaces[:-1]):
