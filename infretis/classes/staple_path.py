@@ -502,48 +502,66 @@ class StaplePath(Path):
             
         
         elif pp_intfs[1] < orders[end_extremal] < pp_intfs[2]:  # LML end
-            left_border = self._find_border_vectorized(orders, start_extremal, pp_intfs[0], 'left')
+            left_border = self._find_border_vectorized(orders, end_extremal, pp_intfs[0], 'leftl')
             right_border = len(orders) - 2
             pptype = "LML"
         elif pp_intfs[1] < orders[start_extremal] < pp_intfs[2]:  # LML start
             left_border = 1
-            right_border = self._find_border_vectorized(orders, start_extremal, pp_intfs[0], 'right')
+            right_border = self._find_border_vectorized(orders, start_extremal, pp_intfs[0], 'rightl')
             pptype = "LML"
         elif pp_intfs[0] < orders[start_extremal] < pp_intfs[1]:  # RMR start
             left_border = 1
-            right_border = self._find_border_vectorized(orders, start_extremal, pp_intfs[2], 'right')
+            right_border = self._find_border_vectorized(orders, start_extremal, pp_intfs[2], 'rightr')
             pptype = "RMR"
         elif pp_intfs[0] < orders[end_extremal] < pp_intfs[1]:  # RMR end
-            left_border = self._find_border_vectorized(orders, end_extremal, pp_intfs[2], 'left')
+            left_border = self._find_border_vectorized(orders, end_extremal, pp_intfs[2], 'leftr')
             right_border = len(orders) - 2
             pptype = "RMR"
         else:
-            valid_indices = [idx for idx in np.where((orders > pp_intfs[0]) & (orders < pp_intfs[2]))[0] if start_info[2] <= idx <= end_info[2]]
-            if len(valid_indices) == 0:
+            def split_runs(a):
+                if not a: return []
+                runs = [[a[0]]]
+                for x in a[1:]:
+                    g = runs[-1]
+                    if abs(x - g[-1]) == 1 and (len(g) < 2 or x - g[-1] == g[1] - g[0]):
+                        g.append(x)
+                    else:
+                        runs.append([x])
+                return runs
+            poss_indices = [idx for idx in np.where((orders > pp_intfs[0]) & (orders < pp_intfs[2]))[0] if start_info[2] <= idx <= end_info[2]]
+            valid_idx_list = split_runs(poss_indices)
+            for run in valid_idx_list:
+                if min(orders[run]) <= pp_intfs[1] <= max(orders[run]):
+                    valid_indices = run
+                    break
+            if len(poss_indices) == 0:
                 raise ValueError("No valid segment found")
             left_border = valid_indices[0]
             right_border = valid_indices[-1]
             pptype = "LMR" if start_info[1] < end_info[1] else "RML"
-            
+
         return left_border, right_border, pptype
     
     def _find_border_vectorized(self, orders: np.ndarray, center_idx: int, 
                                threshold: float, direction: str) -> int:
         """Find border using vectorized operations."""
-        if direction == 'left':
+        if 'left' in direction:
             search_range = range(center_idx, -1, -1)
-            condition = orders <= threshold
         else:  # right
             search_range = range(center_idx, len(orders))
+        if direction[-1] == 'l':
             condition = orders <= threshold
+        else: # 'r'
+            condition = orders >= threshold
+
             
         for idx in search_range:
             if condition[idx]:
-                return idx + 1 if direction == 'left' else idx - 1
-                
-        return 1 if direction == 'left' else len(orders) - 2
-    
-    def _validate_pp_segment(self, left_border: int, right_border: int, 
+                return idx + 1 if 'left' in direction else idx - 1
+
+        return 1 if 'left' in direction else len(orders) - 2
+
+    def _validate_pp_segment(self, left_border: int, right_border: int,
                            pp_intfs: List[float]) -> bool:
         """Validate that the path segment crosses the middle interface."""
         if left_border >= right_border:

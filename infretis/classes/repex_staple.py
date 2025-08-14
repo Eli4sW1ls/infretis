@@ -31,7 +31,7 @@ class REPEX_state_staple(REPEX_state):
         super().__init__(config, minus=True)
         
         # Enable visual validation by default (can be disabled in config)
-        self.visual_validation = config.get("output", {}).get("visual_validation", True)
+        self.visual_validation = config.get("output", {}).get("visual_validation", False)
 
     # TODO: add infinite swap functionality
     # @property
@@ -114,34 +114,34 @@ class REPEX_state_staple(REPEX_state):
         # If we have invalid sums, try to repair
         if not np.allclose(row_sums, 1) or not np.allclose(col_sums, 1):
             print("WARNING: Matrix is not doubly stochastic, attempting repair...")
+            raise Exception("Matrix repair not implemented")
+            # # Normalize rows first
+            # for i in range(len(out)):
+            #     if row_sums[i] > 0:
+            #         out[i, :] /= row_sums[i]
+            #     else:
+            #         # For zero rows, distribute uniformly over support
+            #         support = np.where(non_locked[i, :] > 0)[0]
+            #         if len(support) > 0:
+            #             out[i, support] = 1.0 / len(support)
             
-            # Normalize rows first
-            for i in range(len(out)):
-                if row_sums[i] > 0:
-                    out[i, :] /= row_sums[i]
-                else:
-                    # For zero rows, distribute uniformly over support
-                    support = np.where(non_locked[i, :] > 0)[0]
-                    if len(support) > 0:
-                        out[i, support] = 1.0 / len(support)
-            
-            # Check column normalization
-            col_sums = out.sum(axis=0)
-            if not np.allclose(col_sums, 1):
-                # Use Sinkhorn-like iteration to make doubly stochastic
-                for _ in range(100):  # max iterations
-                    # Normalize rows
-                    row_sums = out.sum(axis=1)
-                    out = out / row_sums[:, np.newaxis]
+            # # Check column normalization
+            # col_sums = out.sum(axis=0)
+            # if not np.allclose(col_sums, 1):
+            #     # Use Sinkhorn-like iteration to make doubly stochastic
+            #     for _ in range(100):  # max iterations
+            #         # Normalize rows
+            #         row_sums = out.sum(axis=1)
+            #         out = out / row_sums[:, np.newaxis]
                     
-                    # Normalize columns
-                    col_sums = out.sum(axis=0)
-                    out = out / col_sums[np.newaxis, :]
+            #         # Normalize columns
+            #         col_sums = out.sum(axis=0)
+            #         out = out / col_sums[np.newaxis, :]
                     
-                    # Check convergence
-                    if (np.allclose(out.sum(axis=1), 1) and 
-                        np.allclose(out.sum(axis=0), 1)):
-                        break
+            #         # Check convergence
+            #         if (np.allclose(out.sum(axis=1), 1) and 
+            #             np.allclose(out.sum(axis=0), 1)):
+            #             break
 
         # Final validation
         assert np.allclose(out.sum(axis=1), 1), f"Row sums: {out.sum(axis=1)}"
@@ -317,8 +317,11 @@ class REPEX_state_staple(REPEX_state):
         """Plot path with validation info for visual debugging."""
         try:
             # Get trajectory order parameter values
-            orders = traj.get_orders_array()
-            
+            try:
+                orders = traj.get_orders_array()
+            except:
+                orders = np.array([php.order[0] for php in traj.phasepoints])
+ 
             # Create figure with high DPI for clarity
             fig, ax = plt.subplots(figsize=(12, 8), dpi=100)
             
@@ -336,9 +339,10 @@ class REPEX_state_staple(REPEX_state):
             
             # Highlight shooting region if it exists for this specific ensemble
             if ('sh_region' in traj_data and traj_data['sh_region'] is not None and 
-                isinstance(traj_data['sh_region'], dict) and ens_num in traj_data['sh_region']):
+                isinstance(traj_data['sh_region'], dict)):
                 
-                sh_start, sh_end = traj_data['sh_region'][ens_num]
+                sh_regions = list(traj_data['sh_region'].items())
+                sh_start, sh_end = sh_regions[0][1]
                 if sh_start < len(orders) and sh_end < len(orders) and sh_start < sh_end:
                     # Get the order parameter range in the shooting region
                     sh_orders = orders[sh_start:sh_end+1]
@@ -376,10 +380,10 @@ class REPEX_state_staple(REPEX_state):
                 max_idx = np.argmax(orders)
                 min_idx = np.argmin(orders)
                 ax.scatter(max_idx, orders[max_idx], c='red', s=100, marker='^', 
-                          label=f'Max OP: {traj.ordermax:.3f}', zorder=5)
+                          label=f'Max OP: {traj.ordermax[0]:.3f}', zorder=5)
                 ax.scatter(min_idx, orders[min_idx], c='purple', s=100, marker='v',
-                          label=f'Min OP: {traj.ordermin:.3f}', zorder=5)
-            
+                          label=f'Min OP: {traj.ordermin[0]:.3f}', zorder=5)
+
             # Set labels and title
             ax.set_xlabel('Time step', fontsize=12)
             ax.set_ylabel('Order parameter', fontsize=12)
@@ -577,6 +581,7 @@ class REPEX_state_staple(REPEX_state):
                     }
                 else:
                     st, end, valid = out_traj.check_turns(self.interfaces)
+                    s_offset, e_offset = 0, 0
                     if not valid:
                         logger.warning(
                             "Path does not have valid turns, cannot load staple path."
@@ -587,7 +592,18 @@ class REPEX_state_staple(REPEX_state):
                     else:
                         assert out_traj.pptype[0] == ens_num
                         pptype = out_traj.pptype[1]
-                        if 
+                    if ens_num in [0, 1] and st[1] == end[1] == 0:
+                        if ens_num == 0:
+                            if pptype == "LMR":
+                                e_offset = 1
+                            elif pptype == "RML":
+                                s_offset = 1 
+                        elif ens_num == 1:
+                            if pptype != "LML":
+                                raise ValueError(
+                                    f"Ensemble {ens_num} has invalid pptype {pptype}."
+                                )
+                            e_offset = 1 
                     if ens_num not in out_traj.sh_region.keys() or len(out_traj.sh_region[ens_num]) != 2:
                         sh_region = out_traj.get_sh_region(self.interfaces, self.ensembles[ens_num + 1]['interfaces'])
                         out_traj.sh_region[ens_num] = sh_region
@@ -602,7 +618,7 @@ class REPEX_state_staple(REPEX_state):
                         "adress": out_traj.adress,
                         "weights": out_traj.weights,
                         "frac": np.zeros(self.n, dtype="longdouble"),
-                        "ptype": str(st[1]) + pptype + str(end[1]),
+                        "ptype": str(st[1] + s_offset) + pptype + str(end[1] + e_offset),
                         "sh_region": out_traj.sh_region,
                     }
                 traj_num += 1
@@ -659,29 +675,34 @@ class REPEX_state_staple(REPEX_state):
             any(move == "sh" for move in md_items["moves"])):
             print("\n" + "🎯 VISUAL VALIDATION AFTER SHOOTING MOVE 🎯".center(80, "="))
             
-            # Plot each trajectory that was just processed
+            # Plot only newly shot paths in their respective ensembles
             for i, ens_num in enumerate(picked.keys() if picked else []):
                 if ens_num in picked and "traj" in picked[ens_num]:
                     out_traj = picked[ens_num]["traj"]
                     traj_number = pn_news[i] if i < len(pn_news) else "Unknown"
                     
-                    # Get the trajectory data
-                    if traj_number in self.traj_data:
+                    # Only plot if it's a newly shot path (path_number matches the new trajectory)
+                    # and not from ensemble -1 (which doesn't have shooting regions)
+                    if (traj_number in self.traj_data and 
+                        out_traj.path_number == traj_number and 
+                        ens_num != -1):
+                        
                         current_traj_data = self.traj_data[traj_number]
                         
                         # Print detailed trajectory data
                         self.print_traj_data_detailed(current_traj_data, traj_number)
                         
                         # Plot the path with validation info
-                        print(f"\n📊 Plotting trajectory #{traj_number} from ensemble {ens_num}...")
-                        print(f"   Status: {md_items.get('status', 'Unknown')}")
-                        print(f"   Move type: {'sh' if 'sh' in md_items.get('moves', []) else 'other'}")
+                        print(f"\n📊 Plotting newly shot trajectory #{traj_number} from ensemble {ens_num}...")
+                        print(f"   Move type: shooting")
                         print("   Close the plot window to continue...")
                         
-                        self.plot_path_validation(out_traj, current_traj_data, ens_num+1, "sh")
+                        self.plot_path_validation(out_traj, current_traj_data, ens_num, "sh")
                         
+                    elif ens_num == -1:
+                        print(f"⏭️  Skipping ensemble -1 (no shooting region)")
                     else:
-                        print(f"⚠️  Warning: Trajectory data for path #{traj_number} not found")
+                        print(f"⏭️  Skipping path #{traj_number} (not a newly shot path)")
             
             print("=" * 80)
         
@@ -712,6 +733,12 @@ class REPEX_state_staple(REPEX_state):
         # we add all the i+ paths.
         for i in range(size - 1):
             st, end, valid = paths[i+1].check_turns(interfaces)
+            s_offset, e_offset = 0, 0
+            if i == 1 and st[1] == end[1] == 0:
+                if pptype == "LMR":
+                    e_offset = 1
+                elif pptype == "RML":
+                    s_offset = 1 
             if not valid:
                 logger.warning("Path does not have valid turns, cannot load staple path.")
                 raise ValueError("Path does not have valid turns.")
@@ -749,7 +776,7 @@ class REPEX_state_staple(REPEX_state):
                 "adress": paths[i + 1].adress,
                 "weights": paths[i + 1].weights,
                 "frac": np.array(frac, dtype="longdouble"),
-                "ptype": str(st[1]) + pptype + str(end[1]),
+                "ptype": str(st[1] + s_offset) + pptype + str(end[1] + e_offset),
                 "sh_region": paths[i+1].sh_region
             }
         # add minus path:

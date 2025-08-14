@@ -140,13 +140,10 @@ def calc_cv_vector(
 
     if isinstance(path, StaplePath):
         staple_ha = 1.
-        if path.pptype[1] in ["LML", "RMR"]:
-            if 2 <= path.pptype[0] <= len(interfaces) - 3:
-                staple_ha = 0.5
-            elif path.pptype[0] == 1 and path.pptype[1] == "RMR":
-                staple_ha = 0.5
-            elif path.pptype[0] == len(interfaces) - 2 and path.pptype[1] == "LML":
-                staple_ha = 0.5
+        if path.pptype[0] > 0 and path.pptype[1] in ["LML", "RMR"]:
+            staple_ha = 0.5
+        elif len(interfaces)-1 <= path.pptype[0] or path.pptype[0] < 0:
+            raise ValueError(f"Invalid path type ensemble: {path.pptype[0]}")
 
     for idx, intf_i in enumerate(interfaces[:-1]):
         if moves[idx + 1] == "wf":
@@ -1923,7 +1920,7 @@ def staple_sh(
         shooting_point.order[0],
         idx,
         trial_path.length,
-        (0, pptype),
+        (int(ens_set["ens_name"])-1, pptype),
         trial_path.sh_region,
     )
     if not success:
@@ -2336,7 +2333,7 @@ def staple_extender(
                     full_staple.status = "FTX"
                     success = False
             # print("length after pasting:", full_staple.length, source_seg.length+turn_seg.length - 2)
-            full_staple.sh_region[int(ens_set["ens_name"])-1] = (1, full_staple.length - 2)
+            full_staple.sh_region[int(ens_set["ens_name"])-1] = (1, source_seg.length - 2)
             full_staple.weight = 2.0
     else:
         bw_turn = source_seg.empty_path(
