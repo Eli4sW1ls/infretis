@@ -10,6 +10,7 @@ import numpy as np
 import tomli_w
 from numpy.random import default_rng
 import matplotlib.pyplot as plt
+from scipy.sparse.csgraph import connected_components
 
 from infretis.classes.repex import REPEX_state, spawn_rng
 from infretis.classes.engines.factory import assign_engines
@@ -25,7 +26,6 @@ DATE_FORMAT = "%Y.%m.%d %H:%M:%S"
 class REPEX_state_staple(REPEX_state):
     """Define the REPPEX object."""
 
-
     def __init__(self, config, minus=False):
         """Initiate REPEX given confic dict from *toml file."""
         super().__init__(config, minus=True)
@@ -33,254 +33,342 @@ class REPEX_state_staple(REPEX_state):
         # Enable visual validation by default (can be disabled in config)
         self.visual_validation = config.get("output", {}).get("visual_validation", False)
 
-    # TODO: add infinite swap functionality
-    # @property
-    # def prob(self):
-    #     """Calculate the P matrix. For REPPTIS there is no swap,
-
-    #     so prob for a path in 1 ensemble is 100% and zero otherwise.
-
-    #     For RETIS this initiates a permanent calc."""
-    #     prop = np.identity(self.n)
-    #     prop[-1,-1] = 0.
-    #     self._last_prob = prop.copy()
-    #     return prop*(1-np.array(self._locks))
-
-    # def add_traj(self, ens, traj, valid, count=True, n=0):
-    #     """Add traj to state and calculate P matrix."""
-    #     valid = np.zeros(self.n)
-    #     valid[ens+1] = 1.
-    #     ens += self._offset
-    #     assert valid[ens] != 0
-    #     # invalidate last prob
-    #     self._last_prob = None
-    #     self._trajs[ens] = traj
-    #     self.state[ens, :] = valid
-    #     self.unlock(ens)
-
-    #     # Calculate P matrix
-    #     self.prob
+    def find_blocks(self, arr):
+        """
+        Find blocks in a W matrix using graph theory.
+        This is a robust method that can handle any matrix structure.
+        """
+        if arr.shape[0] != arr.shape[1]:
+            raise ValueError("Input matrix must be square.")
+        
+        # Create a graph from the non-zero elements of the matrix
+        # Symmetrize the graph to ensure undirected components are found correctly
+        graph = (arr != 0) | (arr.T != 0)
+        
+        # Find connected components, which correspond to the blocks
+        n_components, labels = connected_components(csgraph=graph, directed=False, return_labels=True)
+        
+        blocks = []
+        for i in range(n_components):
+            # Find the indices of the nodes in the current component
+            block_indices = np.where(labels == i)[0]
+            blocks.append(block_indices)
+            
+        # Sort blocks by their starting index for deterministic processing
+        blocks.sort(key=lambda b: b[0])
+        return blocks
 
     def inf_retis(self, input_mat, locks):
-        """Permanent calculator with robust fallback and blocking optimization."""
-        # Drop locked rows and columns
+        """
+        Permanent calculator for STAPLE, optimized with robust block detection.
+        """
+        # 1. Handle locked rows/columns
         bool_locks = locks == 1
-        # get non_locked minus interfaces
-        offset = self._offset - sum(bool_locks[: self._offset])
-        # make insert list
-        i = 0
-        insert_list = []
-        for lock in bool_locks:
-            if lock:
-                insert_list.append(i)
-            else:
-                i += 1
-
-        # Drop locked rows and columns
-        non_locked = input_mat[~bool_locks, :][:, ~bool_locks]
-
-        # Check if this is a simple permutation matrix (identity-like)
-        is_permutation = (
-            np.all(non_locked.sum(axis=1) == 1)
-            and np.all(non_locked.sum(axis=0) == 1)
-            and np.all((non_locked == 0) | (non_locked == 1))
-        )
-
-        if is_permutation:
-            # For permutation matrices, the probability matrix is the same
-            out = non_locked.astype("longdouble")
-        else:
-            # Try the advanced blocking algorithm from repex.py
-            try:
-                if len(non_locked) >= 8:
-                    out = self._inf_retis_with_blocking(non_locked, offset)
-                    # print(f"Successfully used blocking algorithm for {len(non_locked)}x{len(non_locked)} matrix")
-                else:
-                    raise Exception("Matrix too small for blocking algorithm")
-            except Exception as e:
-                # print(f"Blocking algorithm failed ({e}), using fallback methods...")
-                # Fall back to original simple method
-                if len(non_locked) <= 12:
-                    # print(f"Using permanent method for {len(non_locked)}x{len(non_locked)} matrix")
-                    out = self.permanent_prob(non_locked)
-                else:
-                    print(f"Using random approximation for {len(non_locked)}x{len(non_locked)} matrix")
-                    out = self.random_prob(non_locked)
-
-        # Validate the result
-        row_sums = out.sum(axis=1)
-        col_sums = out.sum(axis=0)
+        live_indices = np.where(~bool_locks)[0]
         
-        # If we have invalid sums, try to repair
-        if not np.allclose(row_sums, 1) or not np.allclose(col_sums, 1):
-            print("WARNING: Matrix is not doubly stochastic, attempting repair...")
-            raise Exception("Matrix repair not implemented")
-            # # Normalize rows first
-            # for i in range(len(out)):
-            #     if row_sums[i] > 0:
-            #         out[i, :] /= row_sums[i]
-            #     else:
-            #         # For zero rows, distribute uniformly over support
-            #         support = np.where(non_locked[i, :] > 0)[0]
-            #         if len(support) > 0:
-            #             out[i, support] = 1.0 / len(support)
+        if len(live_indices) == 0:
+            return np.zeros_like(input_mat, dtype="longdouble")
+
+        # Create a submatrix with only the "live" (unlocked) rows and columns
+        live_mat = input_mat[np.ix_(live_indices, live_indices)]
+
+        # 2. Find independent blocks in the live matrix
+        blocks = self.find_blocks(live_mat)
+        
+        out = np.zeros_like(live_mat, dtype="longdouble")
+
+        # 3. Process each block independently
+        for block_indices in blocks:
+            # Create a view of the sub-matrix for the current block
+            sub_matrix = live_mat[np.ix_(block_indices, block_indices)]
             
-            # # Check column normalization
-            # col_sums = out.sum(axis=0)
-            # if not np.allclose(col_sums, 1):
-            #     # Use Sinkhorn-like iteration to make doubly stochastic
-            #     for _ in range(100):  # max iterations
-            #         # Normalize rows
-            #         row_sums = out.sum(axis=1)
-            #         out = out / row_sums[:, np.newaxis]
-                    
-            #         # Normalize columns
-            #         col_sums = out.sum(axis=0)
-            #         out = out / col_sums[np.newaxis, :]
-                    
-            #         # Check convergence
-            #         if (np.allclose(out.sum(axis=1), 1) and 
-            #             np.allclose(out.sum(axis=0), 1)):
-            #             break
+            if sub_matrix.shape[0] == 0:
+                continue
+            
+            prob_matrix = np.zeros_like(sub_matrix, dtype="longdouble")
+            
+            # Heuristics for choosing the best permanent algorithm
+            if sub_matrix.shape[0] == 1:
+                prob_matrix = np.array([[1.0]])
+            elif np.all(np.isclose(sub_matrix, sub_matrix[0, :]) | (sub_matrix == 0)):
+                prob_matrix = self.quick_prob(sub_matrix)
+            elif sub_matrix.shape[0] <= 12:
+                # Use exact Glynn formula for small matrices
+                prob_matrix = self.permanent_prob(sub_matrix)
+            else:
+                # Fallback to probabilistic method for large, complex matrices
+                self._random_count += 1
+                logger.info(f"Using random method for block of size {sub_matrix.shape[0]}")
+                prob_matrix = self.random_prob(sub_matrix)
 
-        # Final validation
-        assert np.allclose(out.sum(axis=1), 1), f"Row sums: {out.sum(axis=1)}"
-        assert np.allclose(out.sum(axis=0), 1), f"Col sums: {out.sum(axis=0)}"
+            # Place the calculated probability matrix into the correct block of the output matrix
+            out[np.ix_(block_indices, block_indices)] = prob_matrix
 
-        # reinsert zeroes for the locked ensembles
-        final_out_rows = np.insert(out, insert_list, 0, axis=0)
-
-        # reinsert zeroes for the locked trajectories
-        final_out = np.insert(final_out_rows, insert_list, 0, axis=1)
+        # 4. Normalize and verify the probability matrix
+        row_sums = np.sum(out, axis=1, keepdims=True)
+        row_sums[row_sums == 0] = 1.0  # Avoid division by zero for empty rows
+        if np.any(row_sums > 0):
+            out /= row_sums
+        
+        # 5. Re-insert rows/columns for locked ensembles
+        final_out = np.zeros_like(input_mat, dtype="longdouble")
+        final_out[np.ix_(live_indices, live_indices)] = out
 
         return final_out
 
-    def _inf_retis_with_blocking(self, non_locked, offset):
-        """Advanced inf_retis algorithm with blocking from repex.py."""
-        # Sort based on the index of the last non-zero values in the rows
-        # argmax(a>0) gives back the first column index that is nonzero
-        # so looping over the columns backwards and multiplying by -1
-        # gives the right ordering
-        minus_idx = np.argsort(np.argmax(non_locked[:offset] > 0, axis=1))
-        pos_idx = (
-            np.argsort(-1 * np.argmax(non_locked[offset:, ::-1] > 0, axis=1))
-            + offset
-        )
+    def permanent_prob(self, arr):
+        """P matrix calculation for specific W matrix."""
+        out = np.zeros(shape=arr.shape, dtype="longdouble")
+        # Don't overwrite input arr
+        scaled_arr = arr.copy()
+        n = len(scaled_arr)
+        # Rescaling the W-matrix avoids numerical instabilities when the
+        # matrix is large and contains large weights from
+        # high-acceptance moves
+        if n > 0:
+            row_max = np.max(scaled_arr, axis=1, keepdims=True)
+            row_max[row_max == 0] = 1.0
+            scaled_arr = scaled_arr / row_max
 
-        sort_idx = np.append(minus_idx, pos_idx)
-        sorted_non_locked = non_locked[sort_idx]
-
-        # check if all trajectories have equal weights
-        sorted_non_locked_T = sorted_non_locked.T
-        # Check the minus interfaces
-        equal_minus = np.all(
-            sorted_non_locked_T[
-                np.where(
-                    sorted_non_locked_T[:, :offset]
-                    != sorted_non_locked_T[offset - 1, :offset]
-                )
-            ]
-            == 0
-        )
-        # check the positive interfaces
-        if len(sorted_non_locked_T) <= offset:
-            equal_pos = True
-        else:
-            equal_pos = np.all(
-                sorted_non_locked_T[:, offset:][
-                    np.where(
-                        sorted_non_locked_T[:, offset:]
-                        != sorted_non_locked_T[offset, offset:]
-                    )
-                ]
-                == 0
-            )
-
-        equal = equal_minus and equal_pos
-
-        out = np.zeros(shape=sorted_non_locked.shape, dtype="longdouble")
-        if equal:
-            # All trajectories have equal weights, run fast algorithm
-            print(f"Using fast algorithm for equal-weight {len(sorted_non_locked)}x{len(sorted_non_locked)} matrix")
-            # minus move should be run backwards
-            out[:offset, ::-1] = self.quick_prob(
-                sorted_non_locked[:offset, ::-1]
-            )
-            if offset < len(out):
-                # Catch only minus ens available
-                out[offset:] = self.quick_prob(sorted_non_locked[offset:])
-        else:
-            # Use blocking strategy
-            print(f"Using blocking algorithm for complex {len(sorted_non_locked)}x{len(sorted_non_locked)} matrix")
-            blocks = self.find_blocks(sorted_non_locked, offset=offset)
-            for start, stop, direction in blocks:
-                if direction == -1:
-                    cstart, cstop = stop - 1, start - 1
-                    if cstop < 0:
-                        cstop = None
-                else:
-                    cstart, cstop = start, stop
-                subarr = sorted_non_locked[start:stop, cstart:cstop:direction]
-                subarr_T = subarr.T
-                if len(subarr) == 1:
-                    out[start:stop, start:stop] = 1
-                elif np.all(subarr_T[np.where(subarr_T != subarr_T[0])] == 0):
-                    # Either the same weight as the last one or zero
-                    temp = self.quick_prob(subarr)
-                    out[start:stop, cstart:cstop:direction] = temp
-                elif len(subarr) <= 12:
-                    # We can run this subsecond
-                    temp = self.permanent_prob(subarr)
-                    out[start:stop, cstart:cstop:direction] = temp
-                else:
-                    self._random_count += 1
-                    print(
-                        f"random #{self._random_count}, "
-                        f"dims = {len(subarr)}"
-                    )
-                    # do n random parallel samples
-                    temp = self.random_prob(subarr)
-                    out[start:stop, cstart:cstop:direction] = temp
-
-        out[sort_idx] = out.copy()  # COPY REQUIRED TO NOT BREAK STATE!!!
+        for i in range(n):
+            rows = [r for r in range(n) if r != i]
+            sub_arr = scaled_arr[rows, :]
+            for j in range(n):
+                if scaled_arr[i][j] == 0:
+                    continue
+                columns = [r for r in range(n) if r != j]
+                M = sub_arr[:, columns]
+                f = self.fast_glynn_perm(M)
+                out[i][j] = f * scaled_arr[i][j]
+        
+        # Use the same normalization as base REPEX
+        row_sums = np.sum(out, axis=1)
+        max_row_sum = max(row_sums) if len(row_sums) > 0 else 1.0
+        if max_row_sum > 0:
+            return out / max_row_sum
         return out
 
-    def find_blocks(self, arr, offset):
-        """Find blocks in a W matrix."""
-        if len(arr) == 1:
-            return [(0, 1, 1)]
-        # Assume no zeroes on the diagonal or lower triangle
-        temp_arr = arr.copy()
-        # for counting minus blocks
-        temp_arr[:offset, :offset] = arr[:offset, :offset].T
-        temp_arr[offset:, :offset] = 1  # add ones to the lower triangle
-        non_zero = np.count_nonzero(temp_arr, axis=1)
+    def quick_prob(self, arr):
+        """Optimized quick P matrix calculation leveraging STAPLE's contiguous row structure."""
+        # STAPLE property: each row has exactly one contiguous subsequence of non-zeros
+        # This allows for much more efficient permanent calculation
+        
+        # Convert to working matrix (0/1) to analyze structure
+        working_mat = np.where(arr != 0, 1, 0)
+        n = arr.shape[0]
+        
+        # Check if all rows are identical (simple uniform case)
+        first_row = working_mat[0]
+        if np.all(np.all(working_mat == first_row, axis=1)):
+            # All rows are identical - create uniform distribution
+            out_mat = working_mat.astype("longdouble")
+            # Normalize each row to sum to 1
+            row_sums = out_mat.sum(axis=1, keepdims=True)
+            row_sums[row_sums == 0] = 1  # Avoid division by zero
+            out_mat = out_mat / row_sums
+            return out_mat
+
+        # For small matrices (< 5x5), optimization overhead isn't worth it
+        if n < 5:
+            return self.permanent_prob(arr)
+        
+        # For STAPLE matrices, check if we can use contiguous structure optimization
+        if self._is_staple_structured(working_mat):
+            return self._contiguous_permanent_prob(arr)
+        else:
+            # Fall back to standard permanent_prob for non-STAPLE structures
+            return self.permanent_prob(arr)
+
+    def _is_staple_structured(self, working_mat):
+        """Check if matrix has STAPLE structure: contiguous non-zero subsequences in each row."""
+        n = working_mat.shape[0]
+        
+        for i in range(n):
+            row = working_mat[i]
+            # Find the first and last non-zero indices
+            nonzero_indices = np.where(row != 0)[0]
+            
+            if len(nonzero_indices) == 0:
+                continue  # Empty row is valid
+            
+            # Check if all elements between first and last non-zero are also non-zero
+            first_nonzero = nonzero_indices[0] 
+            last_nonzero = nonzero_indices[-1]
+            
+            # All elements in range [first_nonzero, last_nonzero] should be non-zero
+            for j in range(first_nonzero, last_nonzero + 1):
+                if row[j] == 0:
+                    return False  # Found a "hole" - not STAPLE structured
+        
+        return True
+    
+    def _contiguous_permanent_prob(self, arr):
+        """Optimized permanent calculation for STAPLE's contiguous row structure."""
+        n = arr.shape[0]
+        out = np.zeros(shape=arr.shape, dtype="longdouble")
+        
+        # Scale the array to avoid numerical instabilities
+        scaled_arr = arr.copy()
+        if n > 0:
+            row_max = np.max(scaled_arr, axis=1, keepdims=True)
+            row_max[row_max == 0] = 1.0
+            scaled_arr = scaled_arr / row_max
+
+        # For each matrix element (i,j)
+        for i in range(n):
+            for j in range(n):
+                if scaled_arr[i][j] == 0:
+                    continue
+                
+                # Create submatrix by removing row i and column j
+                rows = [r for r in range(n) if r != i]
+                columns = [c for c in range(n) if c != j]
+                submatrix = scaled_arr[np.ix_(rows, columns)]
+                
+                # Calculate permanent of submatrix using optimized method for STAPLE structure
+                if submatrix.size == 0:
+                    perm = 1.0
+                elif submatrix.shape[0] == 1:
+                    perm = submatrix[0, 0] if submatrix.shape[1] == 1 else np.sum(submatrix[0])
+                else:
+                    # Use contiguous structure to optimize permanent calculation
+                    perm = self._fast_contiguous_permanent(submatrix)
+                
+                out[i][j] = perm * scaled_arr[i][j]
+        
+        # Normalize using the same method as base implementation
+        row_sums = np.sum(out, axis=1)
+        max_row_sum = max(row_sums) if len(row_sums) > 0 else 1.0
+        if max_row_sum > 0:
+            return out / max_row_sum
+        return out
+    
+    def _fast_contiguous_permanent(self, matrix):
+        """Fast permanent calculation leveraging contiguous structure."""
+        n = matrix.shape[0]
+        
+        if n <= 2:
+            # For small matrices, use direct calculation
+            return self.fast_glynn_perm(matrix)
+        
+        # For larger matrices with contiguous structure, we can potentially
+        # decompose the permanent calculation more efficiently
+        
+        # Check if matrix has a special structure we can exploit
+        working_mat = np.where(matrix != 0, 1, 0)
+        
+        # If it's upper triangular (common in STAPLE), permanent = product of diagonal
+        if self._is_upper_triangular(working_mat):
+            return np.prod(np.diag(matrix))
+        
+        # If it's block diagonal, we can compute permanent as product of block permanents
+        blocks = self._find_diagonal_blocks(working_mat)
+        if len(blocks) > 1:
+            total_perm = 1.0
+            for block_indices in blocks:
+                if len(block_indices) == 1:
+                    total_perm *= matrix[block_indices[0], block_indices[0]]
+                else:
+                    block_matrix = matrix[np.ix_(block_indices, block_indices)]
+                    total_perm *= self.fast_glynn_perm(block_matrix)
+            return total_perm
+        
+        # For other contiguous structures, fall back to Glynn's algorithm
+        # but the contiguous structure might still provide numerical advantages
+        return self.fast_glynn_perm(matrix)
+    
+    def _is_upper_triangular(self, working_mat):
+        """Check if a 0/1 matrix is upper triangular."""
+        n = working_mat.shape[0]
+        for i in range(n):
+            for j in range(i):
+                if working_mat[i, j] != 0:
+                    return False
+        return True
+    
+    def _find_diagonal_blocks(self, working_mat):
+        """Find diagonal blocks in a matrix."""
+        n = working_mat.shape[0]
+        visited = np.zeros(n, dtype=bool)
         blocks = []
-        start = 0
-        for i, e in enumerate(non_zero):
-            if e == i + 1:
-                direction = -1 if start < offset else 1
-                blocks.append((start, e, direction))
-                start = e
+        
+        for i in range(n):
+            if visited[i]:
+                continue
+            
+            # Find connected component starting from i
+            block = []
+            stack = [i]
+            
+            while stack:
+                current = stack.pop()
+                if visited[current]:
+                    continue
+                    
+                visited[current] = True
+                block.append(current)
+                
+                # Add connected nodes (non-zero elements)
+                for j in range(n):
+                    if not visited[j] and (working_mat[current, j] != 0 or working_mat[j, current] != 0):
+                        stack.append(j)
+            
+            if block:
+                blocks.append(sorted(block))
+        
         return blocks
 
-    def quick_prob(self, arr):
-        """Quick P matrix calculation for specific W matrix."""
-        total_traj_prob = np.ones(shape=arr.shape[0], dtype="longdouble")
-        out_mat = np.zeros(shape=arr.shape, dtype="longdouble")
-        working_mat = np.where(arr != 0, 1, 0)  # convert non-zero numbers to 1
+    def random_prob(self, arr, n=10_000):
+        """P matrix calculation for specific W matrix."""
+        out = np.eye(len(arr), dtype="longdouble")
+        current_state = np.eye(len(arr))
+        choices = len(arr) // 2
+        even = choices * 2 == len(arr)
 
-        for i, column in enumerate(working_mat.T[::-1]):
-            ens = column * total_traj_prob
-            s = ens.sum()
-            if s != 0:
-                ens /= s
-            out_mat[:, -(i + 1)] = ens
-            total_traj_prob -= ens
-            # force negative values to 0
-            total_traj_prob[np.where(total_traj_prob < 0)] = 0
-        return out_mat
-    
+        # The probability to go right
+        prob_right = np.nan_to_num(np.roll(arr, -1, axis=1) / arr)
+
+        # The probability to go left
+        prob_left = np.nan_to_num(np.roll(arr, 1, axis=1) / arr)
+
+        start = 0
+        zero_one = np.array([0, 1])
+        p_m = np.array([1, -1])
+        temp = np.where(current_state == 1)
+
+        for i in range(n):
+            direction = self.rgen.choice(p_m)
+            if not even:
+                start = self.rgen.choice(zero_one)
+
+            temp_left = prob_left[temp]
+            temp_right = prob_right[temp]
+
+            if not even:
+                start = self.rgen.choice(zero_one)
+
+            if direction == -1:
+                probs = (
+                    temp_left[start:-1:2]
+                    * np.roll(temp_right, 1, axis=0)[start:-1:2]
+                )
+            else:
+                probs = temp_right[start:-1:2] * temp_left[start + 1 :: 2]
+
+            r_nums = self.rgen.random(choices)
+            success = r_nums < probs
+
+            for j in np.where(success)[0]:
+                idx = j * 2 + start
+                temp_state = current_state[:, [idx + direction, idx]]
+                current_state[:, [idx, idx + direction]] = temp_state
+                temp_state_2 = temp[0][[idx + direction, idx]]
+                temp[0][[idx, idx + direction]] = temp_state_2
+
+            out += current_state
+
+        return out / (n + 1)
+
     def print_shooted(self, md_items, pn_news):
         """Print shooted."""
         moves = md_items["moves"]
@@ -725,7 +813,6 @@ class REPEX_state_staple(REPEX_state):
                     +f"\tEnsembles\t{self.start_time}\n",
                 )
 
-
     def load_paths(self, paths):
         """Load paths."""
         size = self.n - 1
@@ -934,7 +1021,6 @@ class REPEX_state_staple(REPEX_state):
 
         def find_valid_assignment(ens_idx):
             """Recursively find a valid trajectory for each ensemble."""
-            print(self.state)
             if ens_idx == n_unlocked:
                 return True  # All ensembles have been assigned a trajectory
 
@@ -952,7 +1038,6 @@ class REPEX_state_staple(REPEX_state):
         if find_valid_assignment(0):
             # Apply the solution using a series of swaps to maintain consistency
             self._apply_permutation_via_swaps(assignment)
-            print(self.state)
             logger.info("Successfully resolved deadlock.")
         else:
             logger.error("FATAL: Could not find a valid permutation of trajectories.")

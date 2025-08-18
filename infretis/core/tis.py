@@ -152,7 +152,7 @@ def calc_cv_vector(
             cv.append(compute_weight(path, intfs, moves[idx + 1]))
         elif isinstance(path, StaplePath):
             if path.get_pptype(interfaces, [interfaces[max(0, idx - 1)], interfaces[idx], interfaces[idx + 1]]) != "***":
-                print(f"pptype: {path.get_pptype(interfaces, [interfaces[max(0, idx - 1)], interfaces[idx], interfaces[idx + 1]])} in {idx}, {path.ordermax}, {path.ordermin}")
+                # print(f"pptype: {path.get_pptype(interfaces, [interfaces[max(0, idx - 1)], interfaces[idx], interfaces[idx + 1]])} in {idx}, {path.ordermax}, {path.ordermin}")
                 cv.append(staple_ha)
             else:
                 cv.append(0.0)

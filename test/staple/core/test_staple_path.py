@@ -22,10 +22,10 @@ class TestStaplePath:
 
     def test_init(self):
         """Test that StaplePath can be initialized."""
-        path = StaplePath(maxlen=100, time_origin=0, pptype="")
+        path = StaplePath(maxlen=100, time_origin=0)
         assert path.maxlen == 100
         assert path.time_origin == 0
-        assert path.pptype is None  # pptype is now Optional[Tuple[int, str]] and defaults to None
+        assert path.pptype is None  # pptype defaults to None when not specified
         assert path.sh_region == {}  # sh_region is now a dict and defaults to empty dict
         # Test new caching attributes
         assert hasattr(path, '_cached_orders')
@@ -39,10 +39,10 @@ class TestStaplePath:
 
     def test_init_with_pptype(self):
         """Test that StaplePath can be initialized with pptype."""
-        path = StaplePath(maxlen=50, time_origin=10, pptype="LML")
+        path = StaplePath(maxlen=50, time_origin=10, pptype=(2, "LML"))
         assert path.maxlen == 50
         assert path.time_origin == 10
-        assert path.pptype is None  # pptype parameter is ignored, attribute defaults to None
+        assert path.pptype == (2, "LML")  # pptype should be set as provided
         assert path.sh_region == {}  # sh_region is now a dict and defaults to empty dict
         # Test caching is properly initialized
         assert path._cached_orders is None

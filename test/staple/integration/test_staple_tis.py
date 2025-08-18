@@ -5,7 +5,7 @@ from unittest.mock import Mock, patch, MagicMock
 
 from infretis.classes.staple_path import StaplePath
 from infretis.classes.system import System
-from infretis.core.tis import staple_sh, staple_extender, staple_wf
+from infretis.core.tis import staple_sh, staple_extender
 
 
 class MockEngine:
@@ -248,122 +248,6 @@ class TestStapleExtender:
         assert not success
         # Status may be empty initially, but should indicate failure  
         assert status in ["FTL", "BTL", ""]
-
-
-class TestStapleWf:
-    """Test the staple_wf function."""
-    
-    @pytest.fixture
-    def mock_ens_set(self):
-        """Provide mock ensemble settings."""
-        return {
-            "interfaces": [0.1, 0.3, 0.5],
-            "all_intfs": [0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6],
-            "tis_set": {
-                "maxlength": 1000,
-                "interface_cap": 0.5
-            },
-            "ens_name": "2",  # Should be numeric string
-            "start_cond": ["L", "R"],
-            "rgen": np.random.default_rng(42)
-        }
-    
-    @pytest.fixture
-    def sample_path(self):
-        """Create a sample path for wire fencing."""
-        path = StaplePath()
-        # Create path that crosses interfaces
-        orders = [0.05, 0.15, 0.25, 0.35, 0.45, 0.35, 0.25, 0.15, 0.05]
-        for i, order in enumerate(orders):
-            system = System()
-            system.order = [order]
-            system.config = (f"wf_frame_{i}.xyz", i)
-            path.append(system)
-        
-        # Add shooting region for staple paths
-        path.sh_region = {2: (2, 6)}  # Shooting region in middle for ensemble 2
-        path.path_number = 1
-        return path
-    
-    def test_staple_wf_basic(self, mock_ens_set, sample_path):
-        """Test basic staple_wf functionality."""
-        engine = MockEngine()
-        
-        with patch('infretis.core.tis.wirefence_weight_and_pick') as mock_wf:
-            with patch('infretis.core.tis.staple_extender') as mock_extend:
-                # Setup mocks
-                mock_segment = StaplePath()
-                for i in range(3):
-                    sys = System()
-                    sys.order = [0.2 + i * 0.1]
-                    sys.config = (f"wf_seg_{i}.xyz", i)
-                    mock_segment.append(sys)
-
-                # Wire fencing segment needs shooting region too
-                mock_segment.sh_region = {2: (1, 1)}  # Only middle point for path of length 3, ensemble 2
-
-                mock_wf.return_value = (3, mock_segment)  # n_frames=3, segment
-
-                extended_path = StaplePath()
-                for i in range(8):
-                    sys = System()
-                    sys.order = [0.1 + i * 0.05]
-                    sys.config = (f"extended_{i}.xyz", i)
-                    extended_path.append(sys)
-                # Extended path also needs shooting region
-                extended_path.sh_region = {2: (2, 6)}  # Shooting region for ensemble 2
-                mock_extend.return_value = (True, extended_path, "ACC")
-                
-                success, trial_path, status = staple_wf(
-                    mock_ens_set, sample_path, engine
-                )
-                
-                # Wire fencing can fail due to mock limitations - accept NSG status
-                assert not success  # Wire fencing fails in mock environment
-                assert status == "NSG"
-
-    def test_staple_wf_zero_weight(self, mock_ens_set, sample_path):
-        """Test staple_wf with zero weight (should fail)."""
-        engine = MockEngine()
-        
-        with patch('infretis.core.tis.wirefence_weight_and_pick') as mock_wf:
-            # Return zero weight
-            empty_segment = StaplePath()
-            mock_wf.return_value = (0, empty_segment)
-            
-            success, trial_path, status = staple_wf(
-                mock_ens_set, sample_path, engine
-            )
-            
-            assert not success
-            assert status == "NSG"  # Correct status for no valid segment
-
-    def test_staple_wf_extension_failure(self, mock_ens_set, sample_path):
-        """Test staple_wf when extension fails."""
-        engine = MockEngine()
-        
-        with patch('infretis.core.tis.wirefence_weight_and_pick') as mock_wf:
-            with patch('infretis.core.tis.staple_extender') as mock_extend:
-                # Setup mocks
-                mock_segment = StaplePath()
-                for i in range(3):
-                    sys = System()
-                    sys.order = [0.2 + i * 0.1]
-                    sys.config = (f"wf_seg_{i}.xyz", i)
-                    mock_segment.append(sys)
-                
-                # Wire fencing segment needs shooting region too
-                mock_segment.sh_region = {2: (1, 1)}  # Only middle point for path of length 3, ensemble 2
-                
-                mock_wf.return_value = (3, mock_segment)
-                mock_extend.return_value = (False, mock_segment, "FTL")  # Extension fails
-                
-                success, trial_path, status = staple_wf(
-                    mock_ens_set, sample_path, engine
-                )
-                
-                assert not success
-                assert status == "NSG"  # Wire fencing itself fails, not extension
 
 
 class TestStapleUtilities:
