@@ -10,6 +10,7 @@ from ase import units
 from ase.io import read, write
 from ase.io.trajectory import Trajectory
 from ase.md.langevin import Langevin
+from ase.md.overdamped_langevin import OverdampedLangevin
 from ase.md.velocitydistribution import (
     MaxwellBoltzmannDistribution,
     Stationary,
@@ -65,6 +66,7 @@ class ASEEngine(EngineBase):
         # integrator stuff
         integrator = integrator.lower()
         integrator_map = {
+            "overdamped_lgv": OverdampedLangevin,
             "langevin": Langevin,
             "velocityverlet": VelocityVerlet,
         }
@@ -72,7 +74,7 @@ class ASEEngine(EngineBase):
             raise ValueError(f"{integrator} not in integrator map.")
 
         self.Integrator = integrator_map[integrator]
-        if integrator == "langevin":
+        if integrator == "langevin" or integrator == "overdamped_lgv":
             if langevin_fixcm == -1.0:
                 raise ValueError("'langevin_fixcm' not set in [engine]")
             if langevin_friction == -1.0:

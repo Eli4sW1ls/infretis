@@ -821,14 +821,6 @@ class REPEX_state_staple(REPEX_state):
         for i in range(size - 1):
             st, end, valid = paths[i+1].check_turns(interfaces)
             s_offset, e_offset = 0, 0
-            if i == 1 and st[1] == end[1] == 0:
-                if pptype == "LMR":
-                    e_offset = 1
-                elif pptype == "RML":
-                    s_offset = 1 
-            if not valid:
-                logger.warning("Path does not have valid turns, cannot load staple path.")
-                raise ValueError("Path does not have valid turns.")
             if size <= 3:
                 chk_intf = paths[i+1].check_interfaces(self.ensembles[i + 1]['interfaces'])
                 pptype = str((chk_intf[0] if chk_intf[0] is not None else "") + chk_intf[2] + (chk_intf[1] if chk_intf[1] is not None else ""))
@@ -836,6 +828,14 @@ class REPEX_state_staple(REPEX_state):
             else:
                 pptype = paths[i+1].get_pptype(interfaces, self.ensembles[i + 1]['interfaces'])
                 sh_region = paths[i+1].get_sh_region(interfaces, self.ensembles[i + 1]['interfaces'])
+            if i == 0 and st[1] == end[1] == 0:
+                if pptype == "LMR":
+                    e_offset = 1
+                elif pptype == "RML":
+                    s_offset = 1 
+            if not valid:
+                logger.warning("Path does not have valid turns, cannot load staple path.")
+                raise ValueError("Path does not have valid turns.")
             
             paths[i + 1].pptype = (i, pptype)
             paths[i + 1].sh_region[i] = sh_region

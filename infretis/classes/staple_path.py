@@ -480,8 +480,7 @@ class StaplePath(Path):
             min_order = np.min(orders)
             
             # If path doesn't cross pp_intfs[2], it's a boundary path
-            if ((pp_intfs[2] > pp_intfs[0] and max_order < pp_intfs[2]) or 
-                (pp_intfs[2] < pp_intfs[0] and min_order > pp_intfs[2])):
+            if max_order < pp_intfs[2]:
                 # Path stays on one side of pp_intfs[2], assign simple pptype
                 if orders[0] < pp_intfs[2] and orders[-1] < pp_intfs[2]:
                     pptype = "LML"  # Stays on left side
@@ -489,6 +488,15 @@ class StaplePath(Path):
                     pptype = "RMR"  # Stays on right side
                 left_border = 1
                 right_border = len(orders) - 2
+            elif start_info[1] == end_info[1] == 0:
+                # Path starts and ends on the left side
+                pptype = np.random.choice(["LMR", "RML"], p=[0.5, 0.5])
+                if pptype == "LMR":
+                    left_border = 1
+                    right_border = next(i for i in range(start_extremal + 1, len(orders)) if orders[i] >= pp_intfs[2])-1
+                else:
+                    left_border = next(i for i in range(end_extremal - 1, -1, -1) if orders[i] >= pp_intfs[2]) + 1
+                    right_border = len(orders) - 2
             elif start_info[1] == 0:
                 left_border = 1
                 right_border = next(i for i in range(start_extremal + 1, len(orders)) if orders[i] >= pp_intfs[2])-1
@@ -564,7 +572,7 @@ class StaplePath(Path):
     def _validate_pp_segment(self, left_border: int, right_border: int,
                            pp_intfs: List[float]) -> bool:
         """Validate that the path segment crosses the middle interface."""
-        if left_border >= right_border:
+        if left_border > right_border:
             return False
         
         if pp_intfs[0] == pp_intfs[1]:

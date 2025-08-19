@@ -1760,7 +1760,7 @@ def staple_sh(
         return shoot(ens_set, path, engine, shooting_point, start_cond)
     
     intfs_pp = ens_set["interfaces"]
-    sh_region = path.sh_region.get(int(ens_set["ens_name"]), None)
+    sh_region = path.sh_region.get(int(ens_set["ens_name"])-1, None)
     if sh_region is None:
         sh_region = path.get_sh_region(ens_set["all_intfs"], intfs_pp)
         path.sh_region[int(ens_set["ens_name"])-1] = sh_region
@@ -2251,14 +2251,6 @@ def staple_swap_zero(
             compute_weight(path, intf_w[i], move) if move in ("wf") else 1
         )
     return accept, [path0, path1], status
-
-def staple_swap(
-    picked: dict[int, Any],
-    engines: dict[int, list[EngineBase]],
-) -> tuple[bool, list[InfPath], str]:
-    """Is this needed?"""
-    pass
-
 
 def staple_extender(
     source_seg: InfPath,
