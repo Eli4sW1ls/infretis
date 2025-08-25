@@ -806,8 +806,7 @@ def load_staple_path(pdir: str, lamb_A: float) -> StaplePath:
     # load ordertxt
     with OrderPathFile(ordertxt, "r") as orderfile:
         orderdata = next(orderfile.load())["data"][:, 1:]
-
-    if orderdata[0] > lamb_A and orderdata[1] < lamb_A and orderdata[-2] < lamb_A: # [0-]
+    if orderdata[0] > lamb_A and orderdata[1] <= lamb_A and orderdata[-2] <= lamb_A: # [0-]
         print("0-?: ", orderdata)
         path = Path()
     else:

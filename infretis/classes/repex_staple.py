@@ -32,6 +32,38 @@ class REPEX_state_staple(REPEX_state):
         
         # Enable visual validation by default (can be disabled in config)
         self.visual_validation = config.get("output", {}).get("visual_validation", False)
+        
+        # Disable infinite swap for STAPLE by default (can be re-enabled in config)
+        # This prevents weird results in STAPLE simulations by using identity matrix
+        # Set "staple_infinite_swap": true in config to re-enable infinite swap
+        self.staple_infinite_swap = config.get("simulation", {}).get("staple_infinite_swap", False)
+
+    @property
+    def prob(self):
+        """Calculate the P matrix for STAPLE.
+        
+        By default, STAPLE simulations disable infinite swap (similar to REPPTIS)
+        to prevent weird results. This returns an identity matrix where each path
+        stays in its own ensemble (100% probability) with zero for the ghost ensemble.
+        
+        To re-enable infinite swap (full permanent calculation), set 
+        "staple_infinite_swap": true in the simulation config.
+        """
+        if not self.staple_infinite_swap:
+            # Disable infinite swap: return identity matrix like repex_pp
+            if self._last_prob is None:
+                logger.info("STAPLE: Infinite swap DISABLED - using identity matrix (no path swaps)")
+            prop = np.identity(self.n)
+            prop[-1, -1] = 0.  # Zero probability for ghost ensemble
+            self._last_prob = prop.copy()
+            return prop * (1 - np.array(self._locks))
+        else:
+            # Use full infinite swap calculation from base REPEX class
+            if self._last_prob is None:
+                logger.info("STAPLE: Infinite swap ENABLED - using full permanent calculation")
+                prob = self.inf_retis(abs(self.state), self._locks)
+                self._last_prob = prob.copy()
+            return self._last_prob
 
     def find_blocks(self, arr):
         """
@@ -71,6 +103,7 @@ class REPEX_state_staple(REPEX_state):
 
         # Create a submatrix with only the "live" (unlocked) rows and columns
         live_mat = input_mat[np.ix_(live_indices, live_indices)]
+        live_mat = np.where(live_mat != 0, 1, 0)
 
         # 2. Find independent blocks in the live matrix
         blocks = self.find_blocks(live_mat)
@@ -108,13 +141,43 @@ class REPEX_state_staple(REPEX_state):
         row_sums = np.sum(out, axis=1, keepdims=True)
         row_sums[row_sums == 0] = 1.0  # Avoid division by zero for empty rows
         if np.any(row_sums > 0):
+            if np.any(row_sums > 1):
+                print(f"Warning: Row sums exceed 1: {out}")
             out /= row_sums
         
         # 5. Re-insert rows/columns for locked ensembles
         final_out = np.zeros_like(input_mat, dtype="longdouble")
         final_out[np.ix_(live_indices, live_indices)] = out
+        # try:
+        #     out_repex = REPEX_state(self.config, minus=True).inf_retis(input_mat, locks)
+        # except Exception as e:
+        #     logger.info(f"Error occurred while calculating REPEX: {e}")
+        #     out_repex = np.zeros_like(input_mat, dtype="longdouble")
 
         return final_out
+
+    def add_traj(self, ens, traj, valid, count=True, n=0):
+        """Add traj to state and calculate P matrix.
+        
+        When infinite swap is disabled, behaves like REPPTIS where each path
+        stays in its own ensemble with 100% probability.
+        """
+        if not self.staple_infinite_swap:
+            # Disable infinite swap: use REPPTIS-style behavior
+            valid = np.zeros(self.n)
+            valid[ens + self._offset] = 1.
+            ens += self._offset
+            assert valid[ens] != 0
+            # invalidate last prob
+            self._last_prob = None
+            self._trajs[ens] = traj
+            self.state[ens, :] = valid
+            self.unlock(ens)
+            # Calculate P matrix (will return identity matrix)
+            self.prob
+        else:
+            # Use full infinite swap behavior from base class
+            super().add_traj(ens, traj, valid, count, n)
 
     def permanent_prob(self, arr):
         """P matrix calculation for specific W matrix."""
@@ -528,6 +591,216 @@ class REPEX_state_staple(REPEX_state):
         
         return '\n'.join(info_lines)
 
+    def plot_path_comparison(self, old_path, new_path, ens_num, old_ptype=None, new_ptype=None, 
+                           old_sh_region=None, new_sh_region=None):
+        """Compare old and new path properties with side-by-side visualization."""
+        try:
+            import matplotlib.pyplot as plt
+            import numpy as np
+            
+            # Get order parameter arrays
+            try:
+                old_orders = old_path.get_orders_array()
+            except:
+                old_orders = np.array([php.order[0] for php in old_path.phasepoints])
+            
+            try:
+                new_orders = new_path.get_orders_array()
+            except:
+                new_orders = np.array([php.order[0] for php in new_path.phasepoints])
+            
+            # Create side-by-side comparison plot
+            fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(18, 8), dpi=100)
+            
+            # Plot old path
+            ax1.plot(range(len(old_orders)), old_orders, 'b-', linewidth=2, label='Original path')
+            ax1.scatter(range(len(old_orders)), old_orders, c='blue', s=20, alpha=0.6)
+            
+            # Plot new path
+            ax2.plot(range(len(new_orders)), new_orders, 'r-', linewidth=2, label='New path')
+            ax2.scatter(range(len(new_orders)), new_orders, c='red', s=20, alpha=0.6)
+            
+            # Add interfaces to both plots
+            interfaces = self.interfaces
+            for ax in [ax1, ax2]:
+                for i, interface in enumerate(interfaces):
+                    color = 'red' if i == 0 else 'orange' if i == len(interfaces)-1 else 'gray'
+                    linestyle = '--' if i in [0, len(interfaces)-1] else ':'
+                    ax.axhline(y=interface, color=color, linestyle=linestyle, alpha=0.7, 
+                              label=f'Interface {i}: {interface:.3f}')
+            
+            # Highlight old shooting region
+            if old_sh_region is not None and isinstance(old_sh_region, (tuple, list)) and len(old_sh_region) == 2:
+                sh_start, sh_end = old_sh_region
+                if sh_start < len(old_orders) and sh_end < len(old_orders) and sh_start < sh_end:
+                    sh_orders = old_orders[sh_start:sh_end+1]
+                    if len(sh_orders) > 0:
+                        sh_x = range(sh_start, min(sh_end+1, len(old_orders)))
+                        sh_y = old_orders[sh_start:min(sh_end+1, len(old_orders))]
+                        ax1.plot(sh_x, sh_y, 'g-', linewidth=4, alpha=0.7, 
+                               label=f'Old shooting region [{sh_start}-{sh_end}]')
+                        ax1.axvline(x=sh_start, color='green', linestyle='--', alpha=0.8, linewidth=2)
+                        ax1.axvline(x=sh_end, color='green', linestyle='--', alpha=0.8, linewidth=2)
+            
+            # Highlight new shooting region
+            if new_sh_region is not None and isinstance(new_sh_region, (tuple, list)) and len(new_sh_region) == 2:
+                sh_start, sh_end = new_sh_region
+                if sh_start < len(new_orders) and sh_end < len(new_orders) and sh_start < sh_end:
+                    sh_orders = new_orders[sh_start:sh_end+1]
+                    if len(sh_orders) > 0:
+                        sh_x = range(sh_start, min(sh_end+1, len(new_orders)))
+                        sh_y = new_orders[sh_start:min(sh_end+1, len(new_orders))]
+                        ax2.plot(sh_x, sh_y, 'g-', linewidth=4, alpha=0.7, 
+                               label=f'New shooting region [{sh_start}-{sh_end}]')
+                        ax2.axvline(x=sh_start, color='green', linestyle='--', alpha=0.8, linewidth=2)
+                        ax2.axvline(x=sh_end, color='green', linestyle='--', alpha=0.8, linewidth=2)
+            
+            # Set titles and labels
+            ax1.set_title(f'BEFORE Shooting Move\nEnsemble {ens_num}\nType: {old_ptype or "Unknown"}\nLength: {len(old_orders)}', 
+                         fontsize=12, pad=15)
+            ax2.set_title(f'AFTER Shooting Move\nEnsemble {ens_num}\nType: {new_ptype or "Unknown"}\nLength: {len(new_orders)}', 
+                         fontsize=12, pad=15)
+            
+            for ax in [ax1, ax2]:
+                ax.set_xlabel('Time step', fontsize=11)
+                ax.set_ylabel('Order parameter', fontsize=11)
+                ax.grid(True, alpha=0.3)
+                ax.legend(fontsize=9, loc='upper right')
+            
+            # Add overall title
+            fig.suptitle(f'🎯 STAPLE PATH COMPARISON - Ensemble {ens_num} 🎯', 
+                        fontsize=16, fontweight='bold')
+            
+            plt.tight_layout()
+            plt.show(block=True)  # Block execution until plot is closed
+            
+        except Exception as e:
+            logger.warning(f"Failed to plot path comparison: {e}")
+            print(f"Plot comparison error: {e}")
+
+    def plot_sh_region_comparison(self, path, ens_num, original_sh_region=None, 
+                                 current_sh_region=None, was_calculated=False):
+        """Plot comparison of sh_regions on the same trajectory."""
+        try:
+            import matplotlib.pyplot as plt
+            import numpy as np
+            
+            # Get order parameter array
+            try:
+                orders = path.get_orders_array()
+            except:
+                orders = np.array([php.order[0] for php in path.phasepoints])
+            
+            # Create figure
+            fig, ax = plt.subplots(figsize=(14, 8), dpi=100)
+            
+            # Plot the path
+            ax.plot(range(len(orders)), orders, 'b-', linewidth=2, label='Path trajectory', alpha=0.7)
+            ax.scatter(range(len(orders)), orders, c='blue', s=15, alpha=0.5)
+            
+            # Add interfaces
+            interfaces = self.interfaces
+            for i, interface in enumerate(interfaces):
+                color = 'red' if i == 0 else 'orange' if i == len(interfaces)-1 else 'gray'
+                linestyle = '--' if i in [0, len(interfaces)-1] else ':'
+                ax.axhline(y=interface, color=color, linestyle=linestyle, alpha=0.7, 
+                          label=f'Interface {i}: {interface:.3f}')
+            
+            # Plot original sh_region (if it existed)
+            if original_sh_region is not None and isinstance(original_sh_region, (tuple, list)) and len(original_sh_region) == 2:
+                sh_start, sh_end = original_sh_region
+                if sh_start < len(orders) and sh_end < len(orders) and sh_start <= sh_end:
+                    # Highlight the original shooting region
+                    sh_x = range(sh_start, min(sh_end+1, len(orders)))
+                    sh_y = orders[sh_start:min(sh_end+1, len(orders))]
+                    ax.plot(sh_x, sh_y, 'purple', linewidth=6, alpha=0.8, 
+                           label=f'ORIGINAL sh_region [{sh_start}-{sh_end}]')
+                    
+                    # Mark boundaries with vertical lines
+                    ax.axvline(x=sh_start, color='purple', linestyle='--', alpha=0.9, linewidth=3)
+                    ax.axvline(x=sh_end, color='purple', linestyle='--', alpha=0.9, linewidth=3)
+                    
+                    # Add text annotations
+                    mid_point = (sh_start + sh_end) // 2
+                    if mid_point < len(orders):
+                        ax.annotate(f'ORIGINAL\n[{sh_start}-{sh_end}]', 
+                                   xy=(mid_point, orders[mid_point]), 
+                                   xytext=(mid_point, orders[mid_point] + 0.2),
+                                   arrowprops=dict(arrowstyle='->', color='purple', alpha=0.8),
+                                   fontsize=10, color='purple', ha='center', fontweight='bold')
+            
+            # Plot current sh_region (after get_sh_region call or unchanged)
+            if current_sh_region is not None and isinstance(current_sh_region, (tuple, list)) and len(current_sh_region) == 2:
+                sh_start, sh_end = current_sh_region
+                if sh_start < len(orders) and sh_end < len(orders) and sh_start <= sh_end:
+                    # Only plot if different from original OR if it was calculated
+                    if original_sh_region != current_sh_region or was_calculated:
+                        # Highlight the current shooting region
+                        sh_x = range(sh_start, min(sh_end+1, len(orders)))
+                        sh_y = orders[sh_start:min(sh_end+1, len(orders))]
+                        color = 'green' if was_calculated else 'orange'
+                        label_suffix = ' (CALCULATED)' if was_calculated else ' (UNCHANGED)'
+                        ax.plot(sh_x, sh_y, color, linewidth=4, alpha=0.7, 
+                               label=f'CURRENT sh_region [{sh_start}-{sh_end}]{label_suffix}')
+                        
+                        # Mark boundaries with vertical lines
+                        ax.axvline(x=sh_start, color=color, linestyle=':', alpha=0.8, linewidth=2)
+                        ax.axvline(x=sh_end, color=color, linestyle=':', alpha=0.8, linewidth=2)
+                        
+                        # Add text annotations
+                        mid_point = (sh_start + sh_end) // 2
+                        if mid_point < len(orders):
+                            y_offset = 0.1 if was_calculated else -0.1
+                            ax.annotate(f'CURRENT\n[{sh_start}-{sh_end}]', 
+                                       xy=(mid_point, orders[mid_point]), 
+                                       xytext=(mid_point, orders[mid_point] + y_offset),
+                                       arrowprops=dict(arrowstyle='->', color=color, alpha=0.8),
+                                       fontsize=10, color=color, ha='center', fontweight='bold')
+            
+            # Set labels and title
+            ax.set_xlabel('Time step', fontsize=12)
+            ax.set_ylabel('Order parameter', fontsize=12)
+            
+            # Create detailed title
+            status = "CALCULATED" if was_calculated else "ALREADY EXISTS"
+            title_parts = [
+                f'🎯 SHOOTING REGION COMPARISON - Ensemble {ens_num}',
+                f'Status: sh_region {status}',
+                f'Path Length: {len(orders)}'
+            ]
+            ax.set_title('\n'.join(title_parts), fontsize=14, pad=20, fontweight='bold')
+            
+            # Add grid and legend
+            ax.grid(True, alpha=0.3)
+            ax.legend(fontsize=10, loc='upper right')
+            
+            # Add info box
+            info_text = f"SHOOTING REGION ANALYSIS:\n"
+            if original_sh_region is None:
+                info_text += "• ORIGINAL: None (not set before)\n"
+            else:
+                info_text += f"• ORIGINAL: {original_sh_region}\n"
+            
+            if current_sh_region is None:
+                info_text += "• CURRENT: None"
+            else:
+                info_text += f"• CURRENT: {current_sh_region}"
+                
+            if was_calculated:
+                info_text += " (NEWLY CALCULATED)"
+            else:
+                info_text += " (UNCHANGED FROM ORIGINAL)"
+            
+            ax.text(0.02, 0.98, info_text, transform=ax.transAxes, fontsize=11,
+                   verticalalignment='top', bbox=dict(boxstyle='round', facecolor='lightblue', alpha=0.8))
+            
+            plt.tight_layout()
+            plt.show(block=True)  # Block execution until plot is closed
+            
+        except Exception as e:
+            logger.warning(f"Failed to plot sh_region comparison: {e}")
+            print(f"Plot sh_region comparison error: {e}")
+
     def print_traj_data_detailed(self, traj_data, traj_num):
         """Print detailed trajectory data after treat_output."""
         print("\n" + "="*60)
@@ -708,6 +981,8 @@ class REPEX_state_staple(REPEX_state):
                         "frac": np.zeros(self.n, dtype="longdouble"),
                         "ptype": str(st[1] + s_offset) + pptype + str(end[1] + e_offset),
                         "sh_region": out_traj.sh_region,
+                        "mc_move": getattr(out_traj, 'generated', 'initial'),
+                        "ensemble": ens_num,
                     }
                 traj_num += 1
                 if (
@@ -758,42 +1033,6 @@ class REPEX_state_staple(REPEX_state):
         self.config["current"]["traj_num"] = traj_num
         self.cworker = md_items["pin"]
         
-        # VISUAL VALIDATION: Plot and display trajectory data after shooting moves
-        if (self.visual_validation and "moves" in md_items and 
-            any(move == "sh" for move in md_items["moves"])):
-            print("\n" + "🎯 VISUAL VALIDATION AFTER SHOOTING MOVE 🎯".center(80, "="))
-            
-            # Plot only newly shot paths in their respective ensembles
-            for i, ens_num in enumerate(picked.keys() if picked else []):
-                if ens_num in picked and "traj" in picked[ens_num]:
-                    out_traj = picked[ens_num]["traj"]
-                    traj_number = pn_news[i] if i < len(pn_news) else "Unknown"
-                    
-                    # Only plot if it's a newly shot path (path_number matches the new trajectory)
-                    # and not from ensemble -1 (which doesn't have shooting regions)
-                    if (traj_number in self.traj_data and 
-                        out_traj.path_number == traj_number and 
-                        ens_num != -1):
-                        
-                        current_traj_data = self.traj_data[traj_number]
-                        
-                        # Print detailed trajectory data
-                        self.print_traj_data_detailed(current_traj_data, traj_number)
-                        
-                        # Plot the path with validation info
-                        print(f"\n📊 Plotting newly shot trajectory #{traj_number} from ensemble {ens_num}...")
-                        print(f"   Move type: shooting")
-                        print("   Close the plot window to continue...")
-                        
-                        self.plot_path_validation(out_traj, current_traj_data, ens_num, "sh")
-                        
-                    elif ens_num == -1:
-                        print(f"⏭️  Skipping ensemble -1 (no shooting region)")
-                    else:
-                        print(f"⏭️  Skipping path #{traj_number} (not a newly shot path)")
-            
-            print("=" * 80)
-        
         if self.printing():
             self.print_shooted(md_items, pn_news)
         # save for possible restart
@@ -828,11 +1067,18 @@ class REPEX_state_staple(REPEX_state):
             else:
                 pptype = paths[i+1].get_pptype(interfaces, self.ensembles[i + 1]['interfaces'])
                 sh_region = paths[i+1].get_sh_region(interfaces, self.ensembles[i + 1]['interfaces'])
-            if i == 0 and st[1] == end[1] == 0:
-                if pptype == "LMR":
-                    e_offset = 1
-                elif pptype == "RML":
-                    s_offset = 1 
+            if i in [0, 1] and st[1] == end[1] == 0:
+                if i == 0:
+                    if pptype == "LMR":
+                        e_offset = 1
+                    elif pptype == "RML":
+                        s_offset = 1 
+                elif i == 1:
+                    if pptype != "LML":
+                        raise ValueError(
+                            f"Ensemble {i} has invalid pptype {pptype}."
+                        )
+                    e_offset = 1 
             if not valid:
                 logger.warning("Path does not have valid turns, cannot load staple path.")
                 raise ValueError("Path does not have valid turns.")
@@ -864,7 +1110,9 @@ class REPEX_state_staple(REPEX_state):
                 "weights": paths[i + 1].weights,
                 "frac": np.array(frac, dtype="longdouble"),
                 "ptype": str(st[1] + s_offset) + pptype + str(end[1] + e_offset),
-                "sh_region": paths[i+1].sh_region
+                "sh_region": paths[i+1].sh_region,
+                "mc_move": getattr(paths[i + 1], 'generated', 'initial'),
+                "ensemble": i,
             }
         # add minus path:
         paths[0].weights = (1.0,)
@@ -885,6 +1133,8 @@ class REPEX_state_staple(REPEX_state):
             "adress": paths[0].adress,
             "frac": np.array(frac, dtype="longdouble"),
             "ptype": str((chk_intf0[0] if chk_intf0[0] is not None else "") + chk_intf0[2] + (chk_intf0[1] if chk_intf0[1] is not None else "")),
+            "mc_move": getattr(paths[0], 'generated', 'initial'),
+            "ensemble": -1,
         }
 
     def initiate_ensembles(self):
@@ -920,6 +1170,8 @@ class REPEX_state_staple(REPEX_state):
                 "ens_name": f"{i:03d}",
                 "must_cross_M": True if i > 0 else False,
                 "start_cond": "R" if not lambda_minus_one and i == 0 else ["L", "R"],
+                "visual_validation": self.visual_validation,  # Pass visual validation setting to each ensemble
+                "repex_state": self,  # Pass reference to repex state for plotting
             }
 
         self.ensembles = pensembles
@@ -1109,6 +1361,7 @@ def write_to_pathens(state, pn_archive):
                     frac.append("----" if f0 == 0.0 else str(f0))
                     weight.append("----" if f0 == 0.0 else str(w0))
             fp.write(
-                string + "\t".join(frac) + "\t" + "\t".join(weight) + "\t\n"
+                string + "\t".join(frac) + "\t" + "\t".join(weight) + "\t" 
+                + str(traj_data[pn].get("mc_move", "unknown")) + "\t" + str(traj_data[pn].get("ensemble", "unknown")) + "\t\n"
             )
             traj_data.pop(pn)

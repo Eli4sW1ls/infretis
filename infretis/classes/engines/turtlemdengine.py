@@ -20,6 +20,7 @@ from turtlemd.integrators import (
 )
 from turtlemd.potentials.lennardjones import LennardJonesCut
 from turtlemd.potentials.well import DoubleWell, DoubleWellPair
+from turtlemd.potentials.flat_walls import FlatWalls1D
 from turtlemd.simulation import MDSimulation
 from turtlemd.system.box import Box as TBox
 from turtlemd.system.particles import Particles as TParticles
@@ -46,6 +47,7 @@ POTENTIAL_MAPS = {
     "doublewell": DoubleWell,
     "lennardjones": LennardJonesCut,
     "doublewellpair": DoubleWellPair,
+    "flatwalls1d": FlatWalls1D,
 }
 
 INTEGRATOR_MAPS = {

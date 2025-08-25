@@ -482,7 +482,7 @@ def load_paths_from_disk(config: Dict[str, Any]) -> List[Path]:
     load_dir = config["simulation"]["load_dir"]
     paths = []
     for pnumber in config["current"]["active"]:
-        if config["simulation"]["mode"] == "staple":
+        if config["simulation"].get("mode", False) == "staple":
             # Lazy import to avoid circular dependency
             from infretis.classes.staple_path import load_staple_path
             new_path = load_staple_path(os.path.join(load_dir, str(pnumber)), config["simulation"]["interfaces"][0])
