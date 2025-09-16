@@ -7,6 +7,7 @@ from datetime import datetime
 import traceback
 
 import numpy as np
+import itertools
 import tomli_w
 from numpy.random import default_rng
 import matplotlib.pyplot as plt
@@ -103,18 +104,33 @@ class REPEX_state_staple(REPEX_state):
 
         # Create a submatrix with only the "live" (unlocked) rows and columns
         live_mat = input_mat[np.ix_(live_indices, live_indices)]
-        live_mat = np.where(live_mat != 0, 1, 0)
 
-        # 2. Find independent blocks in the live matrix
-        blocks = self.find_blocks(live_mat)
+        # 2. Find independent blocks in the live matrix (use binary version for connectivity)
+        binary_mat = np.where(live_mat != 0, 1, 0)
+        print("live matrix:\n", live_mat)
+        print("Binary matrix:\n", binary_mat)
+        
+        sym_mask = (live_mat != 0) & (live_mat.T != 0)
+        masked_live_mat = live_mat * sym_mask
+        # binary_mat = np.where(masked_live_mat != 0, 1, 0)
+        # warn if masking removed rows/columns entirely
+        removed_rows = np.where(np.all(masked_live_mat == 0, axis=1))[0]
+        if removed_rows.size > 0:
+            logger.warning(
+                "staple_enforce_diag removed all nonzero entries for rows %s; no valid permutations remain for those rows",
+                removed_rows.tolist(),
+            )
+            
+        blocks = self.find_blocks(binary_mat)
         
         out = np.zeros_like(live_mat, dtype="longdouble")
 
         # 3. Process each block independently
         for block_indices in blocks:
-            # Create a view of the sub-matrix for the current block
+            # Create a view of the sub-matrix for the current block using ACTUAL WEIGHTS
+            # Use the weighted live matrix (not the binary connectivity matrix)
             sub_matrix = live_mat[np.ix_(block_indices, block_indices)]
-            
+
             if sub_matrix.shape[0] == 0:
                 continue
             
@@ -148,12 +164,14 @@ class REPEX_state_staple(REPEX_state):
         # 5. Re-insert rows/columns for locked ensembles
         final_out = np.zeros_like(input_mat, dtype="longdouble")
         final_out[np.ix_(live_indices, live_indices)] = out
-        # try:
-        #     out_repex = REPEX_state(self.config, minus=True).inf_retis(input_mat, locks)
-        # except Exception as e:
-        #     logger.info(f"Error occurred while calculating REPEX: {e}")
-        #     out_repex = np.zeros_like(input_mat, dtype="longdouble")
-
+        try:
+            out_repex = REPEX_state(self.config, minus=True).inf_retis(input_mat, locks)
+        except Exception as e:
+            logger.info(f"Error occurred while calculating REPEX: {e}")
+            out_repex = np.zeros_like(input_mat, dtype="longdouble")
+        print("locks:", locks)
+        print("staple out:\n", final_out)
+        print("repex out:\n", out_repex)
         return final_out
 
     def add_traj(self, ens, traj, valid, count=True, n=0):
@@ -380,6 +398,45 @@ class REPEX_state_staple(REPEX_state):
                 blocks.append(sorted(block))
         
         return blocks
+
+    def enumerated_prob(self, arr, enforce_diag=False):
+        """Exact P matrix via enumeration for small blocks.
+
+        If enforce_diag is True, only permutations p with both
+        arr[i, p[i]] != 0 and arr[p[i], i] != 0 for all i are allowed.
+        """
+        n = arr.shape[0]
+        P = np.zeros_like(arr, dtype="longdouble")
+        if n == 0:
+            return P
+
+        perms = itertools.permutations(range(n))
+        valid = []
+        for p in perms:
+            if all(W[i, p[i]] != 0 for i in range(n)):    # diagonal-nonzero + row->ensemble validity
+                valid.append(p)
+            # ok_forward = True
+            # ok_diag = True
+            # for i, j in enumerate(p):
+                # if arr[i, j] == 0:
+                #     ok_forward = False      # 
+                #     break   
+                # if enforce_diag and arr[j, i] == 0:
+                #     ok_diag = False
+                #     break
+            # if ok_forward and (not enforce_diag or ok_diag):
+            #     valid.append(p)
+
+        Z = len(valid)
+        if Z == 0:
+            # No valid permutations - return zero matrix (caller must handle)
+            return P
+
+        for p in valid:
+            for i, j in enumerate(p):
+                P[i, j] += 1.0 / Z
+
+        return P
 
     def random_prob(self, arr, n=10_000):
         """P matrix calculation for specific W matrix."""

@@ -568,8 +568,8 @@ class REPEX_state:
         out[sort_idx] = out.copy()  # COPY REQUIRED TO NOT BRAKE STATE!!!
 
         # Make sure we have a valid probability square
-        assert np.allclose(np.sum(out, axis=1), 1)
-        assert np.allclose(np.sum(out, axis=0), 1)
+        assert np.allclose(np.sum(out, axis=1), 1), out
+        assert np.allclose(np.sum(out, axis=0), 1), out
 
         # reinsert zeroes for the locked ensembles
         final_out_rows = np.insert(out, insert_list, 0, axis=0)

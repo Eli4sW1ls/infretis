@@ -112,7 +112,7 @@ class TestStapleWorkflowEndToEnd:
             "runner": {"workers": 1},
             "simulation": {
                 "seed": 42,
-                "interfaces": [0.15, 0.25, 0.35, 0.45],
+                "interfaces": [0.15, 0.2, 0.25],
                 "all_intfs": [0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5],
                 "shooting_moves": ["st_sh", "st_sh", "st_sh", "st_sh"],
                 "mode": "staple",

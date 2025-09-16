@@ -27,13 +27,20 @@ def test_probability_matrix_properties():
     test_cases = [
         {
             'name': 'User\'s specific matrix',
-            'matrix': np.array([
-                [1, 0, 0, 0, 0],
-                [0, 1, 0, 0, 0], 
-                [0, 1, 1, 0, 0],
-                [0, 1, 1, 1, 0],
-                [0, 0, 0, 0, 1]
-            ], dtype=np.float64),
+            'matrix': np.array([    [1, 0, 0, 0, 0],
+                                    [0, 1, 0, 0, 0], 
+                                    [0, 1, 1, 0.5, 0],
+                                    [0, 0, 1, 1, 1],
+                                    [0, 0, 0, 0, 1]
+                                ], dtype=np.float64),
+            
+            # np.array([
+            #     [1, 0, 0, 0, 0],
+            #     [0, 1, 0, 0, 0], 
+            #     [0, 1, 1, 0, 0],
+            #     [0, 1, 1, 1, 0],
+            #     [0, 0, 0, 0, 1]
+            # ], dtype=np.float64),
             'locks': np.zeros(5)
         },
         {

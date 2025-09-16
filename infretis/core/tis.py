@@ -140,11 +140,11 @@ def calc_cv_vector(
 
     if isinstance(path, StaplePath):
         staple_ha = 1.
-        if path.pptype[0] > 0 and path.pptype[1] in ["LML", "RMR"]:
+        if (1 < path.pptype[0] < len(interfaces)-1 and path.pptype[1] in ["LML", "RMR"]) or (path.pptype[0] == 1 and path.pptype[1] == "RMR") \
+                or (path.pptype[0] == len(interfaces)-1 and path.pptype[1] == "LML"):
             staple_ha = 0.5
         elif len(interfaces)-1 <= path.pptype[0] or path.pptype[0] < 0:
             raise ValueError(f"Invalid path type ensemble: {path.pptype[0]}")
-
     for idx, intf_i in enumerate(interfaces[:-1]):
         if moves[idx + 1] == "wf":
             intf_cap = cap if cap is not None else interfaces[-1]
@@ -153,7 +153,10 @@ def calc_cv_vector(
         elif isinstance(path, StaplePath):
             if path.get_pptype(interfaces, [interfaces[max(0, idx - 1)], interfaces[idx], interfaces[idx + 1]]) != "***":
                 # print(f"pptype: {path.get_pptype(interfaces, [interfaces[max(0, idx - 1)], interfaces[idx], interfaces[idx + 1]])} in {idx}, {path.ordermax}, {path.ordermin}")
-                cv.append(staple_ha)
+                if path.pptype[0] == idx:
+                    cv.append(staple_ha)
+                else:
+                    cv.append(1.0)
             else:
                 cv.append(0.0)
         else:
@@ -1759,53 +1762,11 @@ def staple_sh(
     if int(ens_set["ens_name"]) == 0:
         return shoot(ens_set, path, engine, shooting_point, start_cond)
     
-    # CAPTURE ORIGINAL STATE - before any modifications
-    ens_idx = int(ens_set["ens_name"]) - 1
-    original_sh_region = path.sh_region.get(ens_idx, None)
-    
     intfs_pp = ens_set["interfaces"]
-    sh_region = path.sh_region.get(ens_idx, None)
-    sh_region_was_calculated = False
+    sh_region = path.sh_region.get(int(ens_set["ens_name"])-1, None)
     if sh_region is None:
         sh_region = path.get_sh_region(ens_set["all_intfs"], intfs_pp)
-        path.sh_region[ens_idx] = sh_region
-        sh_region_was_calculated = True
-    
-    # Get old path properties for visual validation
-    old_pptype = None
-    if hasattr(path, 'pptype') and path.pptype is not None:
-        if isinstance(path.pptype, tuple) and len(path.pptype) == 2:
-            ens_idx_check, pptype_str = path.pptype
-            if ens_idx_check == ens_idx:
-                old_pptype = pptype_str
-        elif isinstance(path.pptype, str):
-            old_pptype = path.pptype
-    
-    if old_pptype is None:
-        try:
-            old_pptype = path.get_pptype(ens_set["all_intfs"], intfs_pp)
-        except:
-            old_pptype = "Unknown"
-    
-    # VISUAL VALIDATION: Plot sh_region comparison
-    if ens_set.get("visual_validation", False) and ens_set.get("repex_state") is not None:
-        repex_state = ens_set["repex_state"]
-        print("\n" + "🎯 SHOOTING REGION COMPARISON 🎯".center(80, "="))
-        print(f"📊 Comparing sh_regions for ensemble {ens_set['ens_name']}...")
-        print(f"   ORIGINAL sh_region: {original_sh_region}")
-        print(f"   CURRENT sh_region:  {sh_region}")
-        print(f"   Was calculated: {sh_region_was_calculated}")
-        print("   Close the plot window to continue with shooting move...")
-        
-        repex_state.plot_sh_region_comparison(
-            path=path,
-            ens_num=int(ens_set["ens_name"]),
-            original_sh_region=original_sh_region,
-            current_sh_region=sh_region,
-            was_calculated=sh_region_was_calculated
-        )
-        print("=" * 80)
-    
+        path.sh_region[int(ens_set["ens_name"])-1] = sh_region
     # the trial path we will generate
     trial_path = path.empty_path(maxlen=ens_set["tis_set"]["maxlength"])
     if shooting_point is None:
@@ -1968,31 +1929,6 @@ def staple_sh(
     if not success:
         logger.debug("Shooting move failed to extend path.")
         return False, trial_path, trial_path.status
-
-    # VISUAL VALIDATION: Compare old and new path properties
-    if ens_set.get("visual_validation", False) and ens_set.get("repex_state") is not None:
-        repex_state = ens_set["repex_state"]
-        
-        # Get new path properties
-        new_pptype = pptype
-        new_sh_region = trial_path.sh_region.get(int(ens_set["ens_name"])-1, None)
-        
-        print("\n" + "🎯 VISUAL VALIDATION - FINAL COMPARISON 🎯".center(80, "="))
-        print(f"📊 Comparing OLD path vs NEW path for ensemble {ens_set['ens_name']}...")
-        print(f"   ORIGINAL PATH: ptype='{old_pptype}', original_sh_region={original_sh_region}")
-        print(f"   NEW PATH:      ptype='{new_pptype}', new_sh_region={new_sh_region}")
-        print("   Close the plot window to continue simulation...")
-        
-        repex_state.plot_path_comparison(
-            old_path=path,
-            new_path=trial_path,
-            ens_num=int(ens_set["ens_name"]),
-            old_ptype=old_pptype,
-            new_ptype=new_pptype,
-            old_sh_region=original_sh_region,  # Use the truly original sh_region
-            new_sh_region=new_sh_region
-        )
-        print("=" * 80)
 
     return True, trial_path, trial_path.status
 

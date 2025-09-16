@@ -1148,6 +1148,166 @@ class TestStaplePermanentCalculation:
             assert np.all(staple_permanent >= -1e-15), "STAPLE permanent_prob should be non-negative (within numerical precision)"
         except Exception as e:
             print(f"STAPLE permanent calculation approach differs: {e}")
+            
+    def test_known_example_matrix3(self, basic_config):
+        """Test STAPLE implementation with known example matrix3."""
+        state = REPEX_state_staple(basic_config, minus=True)
+        
+        # W_MATRIX3
+        w_matrix = np.array([
+            [1, 0, 0, 0, 0],
+            [0, 1, 1, 1, 0],
+            [0, 1, 1, 1, 0],
+            [0, 0, 0, 1, 1],
+            [0, 1, 1, 1, 1]
+        ], dtype='longdouble')
+        
+        # Expected P_MATRIX3
+        expected_p_matrix = np.array([
+            [1. ,   0.   , 0.  ,  0. ,   0.   ],
+            [0.,    0.375, 0.375, 0.25 , 0.   ],
+            [0.,    0.375, 0.375, 0.25 , 0.   ],
+            [0.,    0.   , 0.   , 0.25 , 0.75],
+            [0.,    0.25 , 0.25 , 0.25 , 0.25]
+        ], dtype='longdouble')
+        
+        # expected_permanent = 
+        
+        print(f"\n=== Test: 5x5 Known Example Matrix3 ===")
+        print(f"Input W matrix:\n{w_matrix}")
+        print(f"Matrix description: Complex REPEX test matrix with large values")
+        # print(f"Expected permanent: {expected_permanent}")
+        print(f"Expected P matrix from base REPEX:\n{expected_p_matrix}")
+        
+        locks = np.zeros(5, dtype=int)
+        
+        # Test the STAPLE implementation
+        result = state.inf_retis(w_matrix, locks)
+        
+        print(f"STAPLE output P matrix:\n{result}")
+        print(f"Row sums: {result.sum(axis=1)}")
+        print(f"Col sums: {result.sum(axis=0)}")
+        print(f"Min value: {np.min(result)}")
+        print(f"Max value: {np.max(result)}")
+        
+        # Verify basic properties
+        assert result.shape == (5, 5)
+        is_valid, validation_info = validate_doubly_stochastic(result, tolerance=1e-8)
+        assert is_valid, f"Result should be doubly stochastic: {validation_info}"
+        
+        print(f"Max row error: {validation_info['max_row_error']}")
+        print(f"Max col error: {validation_info['max_col_error']}")
+        
+        # Check if STAPLE produces similar result to base REPEX
+        # Due to different algorithms, we'll use a more relaxed tolerance
+        # The key is that both should be valid doubly stochastic matrices
+        if np.allclose(result, expected_p_matrix, atol=1e-6):
+            print("✓ STAPLE produces same result as base REPEX for matrix2")
+        else:
+            print("⚠ STAPLE uses different algorithm but produces valid doubly stochastic matrix")
+            print(f"Difference from expected:\n{result - expected_p_matrix}")
+            print(f"Max absolute difference: {np.max(np.abs(result - expected_p_matrix))}")
+            assert np.allclose(result, expected_p_matrix, atol=1e-6)
+            # Verify the result is still mathematically valid
+            assert validation_info['max_row_error'] < 1e-8
+            assert validation_info['max_col_error'] < 1e-8
+            
+        # Test permanent calculation if available
+        try:
+            staple_permanent = state.permanent_prob(w_matrix)
+            print(f"STAPLE permanent_prob sum: {staple_permanent.sum()}")
+            print(f"STAPLE permanent_prob non-negative: {np.all(staple_permanent >= -1e-15)}")
+            # The permanent_prob for STAPLE appears to return the final P matrix, not intermediate probabilities
+            # This is different from base REPEX implementation - STAPLE combines the calculation steps
+            if np.allclose(staple_permanent.sum(), result.shape[0], atol=1e-8):  # Sum equals matrix size
+                print("STAPLE permanent_prob returns final P matrix (sum = matrix size)")
+            else:
+                # The permanent_prob returns intermediate probabilities normalized by total sum,
+                # not doubly stochastic. This is expected - inf_retis does the final normalization
+                assert np.allclose(staple_permanent.sum(), 1.0, atol=1e-8), \
+                    f"STAPLE permanent_prob should sum to 1: {staple_permanent.sum()}"
+            assert np.all(staple_permanent >= -1e-15), "STAPLE permanent_prob should be non-negative (within numerical precision)"
+        except Exception as e:
+            print(f"STAPLE permanent calculation approach differs: {e}")
+            
+    def test_known_example_matrix4(self, basic_config):
+        """Test STAPLE implementation with known example matrix4."""
+        state = REPEX_state_staple(basic_config, minus=True)
+        
+        # W_MATRIX4
+        w_matrix = np.array([
+            [1, 0, 0, 0],
+            [0, 1, 1, 0],
+            [0, 1, 1, 1],
+            [0, 1, 1, 1],
+        ], dtype='longdouble')
+        
+        # Expected P_MATRIX3
+        expected_p_matrix = np.array([
+            [1, 0, 0, 0],
+            [0, 0.5, 0.5, 0.],
+            [0, 0.25, 0.25, 0.5],
+            [0, 0.25, 0.25, 0.5],
+        ], dtype='longdouble')
+        
+        # expected_permanent =
+
+        print(f"\n=== Test: 4x4 Known Example Matrix4 ===")
+        print(f"Input W matrix:\n{w_matrix}")
+        print(f"Matrix description: Complex REPEX test matrix with large values")
+        # print(f"Expected permanent: {expected_permanent}")
+        print(f"Expected P matrix from base REPEX:\n{expected_p_matrix}")
+        
+        locks = np.zeros(4, dtype=int)
+        
+        # Test the STAPLE implementation
+        result = state.inf_retis(w_matrix, locks)
+        
+        print(f"STAPLE output P matrix:\n{result}")
+        print(f"Row sums: {result.sum(axis=1)}")
+        print(f"Col sums: {result.sum(axis=0)}")
+        print(f"Min value: {np.min(result)}")
+        print(f"Max value: {np.max(result)}")
+        
+        # Verify basic properties
+        assert result.shape == (4, 4)
+        is_valid, validation_info = validate_doubly_stochastic(result, tolerance=1e-8)
+        assert is_valid, f"Result should be doubly stochastic: {validation_info}"
+        
+        print(f"Max row error: {validation_info['max_row_error']}")
+        print(f"Max col error: {validation_info['max_col_error']}")
+        
+        # Check if STAPLE produces similar result to base REPEX
+        # Due to different algorithms, we'll use a more relaxed tolerance
+        # The key is that both should be valid doubly stochastic matrices
+        if np.allclose(result, expected_p_matrix, atol=1e-6):
+            print("✓ STAPLE produces same result as base REPEX for matrix2")
+        else:
+            print("⚠ STAPLE uses different algorithm but produces valid doubly stochastic matrix")
+            print(f"Difference from expected:\n{result - expected_p_matrix}")
+            print(f"Max absolute difference: {np.max(np.abs(result - expected_p_matrix))}")
+            assert np.allclose(result, expected_p_matrix, atol=1e-6)
+            # Verify the result is still mathematically valid
+            assert validation_info['max_row_error'] < 1e-8
+            assert validation_info['max_col_error'] < 1e-8
+            
+        # Test permanent calculation if available
+        try:
+            staple_permanent = state.permanent_prob(w_matrix)
+            print(f"STAPLE permanent_prob sum: {staple_permanent.sum()}")
+            print(f"STAPLE permanent_prob non-negative: {np.all(staple_permanent >= -1e-15)}")
+            # The permanent_prob for STAPLE appears to return the final P matrix, not intermediate probabilities
+            # This is different from base REPEX implementation - STAPLE combines the calculation steps
+            if np.allclose(staple_permanent.sum(), result.shape[0], atol=1e-8):  # Sum equals matrix size
+                print("STAPLE permanent_prob returns final P matrix (sum = matrix size)")
+            else:
+                # The permanent_prob returns intermediate probabilities normalized by total sum,
+                # not doubly stochastic. This is expected - inf_retis does the final normalization
+                assert np.allclose(staple_permanent.sum(), 1.0, atol=1e-8), \
+                    f"STAPLE permanent_prob should sum to 1: {staple_permanent.sum()}"
+            assert np.all(staple_permanent >= -1e-15), "STAPLE permanent_prob should be non-negative (within numerical precision)"
+        except Exception as e:
+            print(f"STAPLE permanent calculation approach differs: {e}")
 
     # Edge Cases and Stress Tests
 

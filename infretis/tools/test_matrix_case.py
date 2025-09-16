@@ -28,9 +28,9 @@ def test_specific_matrix():
     test_matrix = np.array([
         [1, 0, 0, 0, 0],
         [0, 1, 0, 0, 0], 
-        [0, 1, 1, 0, 0],
-        [0, 1, 1, 1, 0],
-        [0, 0, 0, 0, 1]
+        [0, 1, 1, 0.5, 0],
+        [0, 0, 1, 1, 1],
+        [0, 0, 0, 0, 0.5]
     ], dtype=np.longdouble)
     
     # No locks (offset = 0 in your case)
