@@ -477,7 +477,7 @@ class StaplePath(Path):
             
             # Check if the path actually crosses the target interface pp_intfs[2]
             max_order = np.max(orders)
-            min_order = np.min(orders)
+            # min_order = np.min(orders)
             
             # If path doesn't cross pp_intfs[2], it's a boundary path
             if max_order < pp_intfs[2]:
@@ -490,7 +490,7 @@ class StaplePath(Path):
                 right_border = len(orders) - 2
             elif start_info[1] == end_info[1] == 0:
                 # Path starts and ends on the left side
-                pptype = np.random.choice(["LMR", "RML"], p=[0.5, 0.5])
+                pptype = np.random.choice(["LMR", "RML"])
                 if pptype == "LMR":
                     left_border = 1
                     right_border = next(i for i in range(start_extremal + 1, len(orders)) if orders[i] >= pp_intfs[2])-1
@@ -507,8 +507,7 @@ class StaplePath(Path):
                 pptype = "LML" if left_border == 1 else "RML"
             else:
                 raise ValueError("Invalid extremal indices for ensemble [0*].")
-            
-        
+
         elif pp_intfs[1] < orders[end_extremal] < pp_intfs[2]:  # LML end
             left_border = self._find_border_vectorized(orders, end_extremal, pp_intfs[0], 'leftl')
             right_border = len(orders) - 2
@@ -538,10 +537,18 @@ class StaplePath(Path):
                 return runs
             poss_indices = [idx for idx in np.where((orders > pp_intfs[0]) & (orders < pp_intfs[2]))[0] if start_info[2] <= idx <= end_info[2]]
             valid_idx_list = split_runs(poss_indices)
+            vis = False
             for run in valid_idx_list:
                 if min(orders[run]) <= pp_intfs[1] <= max(orders[run]):
                     valid_indices = run
+                    vis = True
                     break
+                elif (min(orders[run[0]-1:run[-1]+2]) <= pp_intfs[1] <= max(orders[run[0]-1:run[-1]+2])):
+                    valid_indices = run
+                    vis = True
+                    break
+            if not vis:
+                print(f"Warning: No valid segment found in path with orders {orders} and pp_intfs {pp_intfs}. Returning full path.{poss_indices, valid_idx_list}")
             if len(poss_indices) == 0:
                 raise ValueError("No valid segment found")
             left_border = valid_indices[0]

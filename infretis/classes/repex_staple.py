@@ -107,20 +107,9 @@ class REPEX_state_staple(REPEX_state):
 
         # 2. Find independent blocks in the live matrix (use binary version for connectivity)
         binary_mat = np.where(live_mat != 0, 1, 0)
-        print("live matrix:\n", live_mat)
-        print("Binary matrix:\n", binary_mat)
+        # print("live matrix:\n", live_mat)
+        # print("Binary matrix:\n", binary_mat)
         
-        sym_mask = (live_mat != 0) & (live_mat.T != 0)
-        masked_live_mat = live_mat * sym_mask
-        # binary_mat = np.where(masked_live_mat != 0, 1, 0)
-        # warn if masking removed rows/columns entirely
-        removed_rows = np.where(np.all(masked_live_mat == 0, axis=1))[0]
-        if removed_rows.size > 0:
-            logger.warning(
-                "staple_enforce_diag removed all nonzero entries for rows %s; no valid permutations remain for those rows",
-                removed_rows.tolist(),
-            )
-            
         blocks = self.find_blocks(binary_mat)
         
         out = np.zeros_like(live_mat, dtype="longdouble")
@@ -164,14 +153,14 @@ class REPEX_state_staple(REPEX_state):
         # 5. Re-insert rows/columns for locked ensembles
         final_out = np.zeros_like(input_mat, dtype="longdouble")
         final_out[np.ix_(live_indices, live_indices)] = out
-        try:
-            out_repex = REPEX_state(self.config, minus=True).inf_retis(input_mat, locks)
-        except Exception as e:
-            logger.info(f"Error occurred while calculating REPEX: {e}")
-            out_repex = np.zeros_like(input_mat, dtype="longdouble")
-        print("locks:", locks)
-        print("staple out:\n", final_out)
-        print("repex out:\n", out_repex)
+        # try:
+        #     out_repex = REPEX_state(self.config, minus=True).inf_retis(input_mat, locks)
+        # except Exception as e:
+        #     logger.info(f"Error occurred while calculating REPEX: {e}")
+        #     out_repex = np.zeros_like(input_mat, dtype="longdouble")
+        # print("locks:", locks)
+        # print("staple out:\n", final_out)
+        # print("repex out:\n", out_repex)
         return final_out
 
     def add_traj(self, ens, traj, valid, count=True, n=0):
@@ -1010,23 +999,33 @@ class REPEX_state_staple(REPEX_state):
                     else:
                         assert out_traj.pptype[0] == ens_num
                         pptype = out_traj.pptype[1]
-                    if ens_num in [0, 1] and st[1] == end[1] == 0:
-                        if ens_num == 0:
-                            if pptype == "LMR":
-                                e_offset = 1
-                            elif pptype == "RML":
-                                s_offset = 1 
-                        elif ens_num == 1:
-                            if pptype != "LML":
-                                raise ValueError(
-                                    f"Ensemble {ens_num} has invalid pptype {pptype}."
-                                )
-                            e_offset = 1 
                     if ens_num not in out_traj.sh_region.keys() or len(out_traj.sh_region[ens_num]) != 2:
                         sh_region = out_traj.get_sh_region(self.interfaces, self.ensembles[ens_num + 1]['interfaces'])
                         out_traj.sh_region[ens_num] = sh_region
                     else:
                         sh_region = out_traj.sh_region[ens_num]
+                    if st[1] == end[1]:
+                        if ens_num in [0, 1]: 
+                            if ens_num == 0:
+                                if pptype == "LMR":
+                                    e_offset = 1
+                                elif pptype == "RML":
+                                    s_offset = 1 
+                            elif ens_num == 1:
+                                if pptype != "LML":
+                                    raise ValueError(
+                                        f"Ensemble {ens_num} has invalid pptype {pptype}."
+                                    )
+                                e_offset = np.random.choice([0, 1])
+                                s_offset = 1 - e_offset
+                        elif ens_num == len(self.ensembles) - 2:
+                            if pptype != "RMR":
+                                raise ValueError(
+                                    f"Ensemble {ens_num} has invalid pptype {pptype}."
+                                )
+                            e_offset = np.random.choice([0, -1])
+                            s_offset = -1 - e_offset
+                    
                     # print(f"{out_traj.path_number}, pptype: {pptype}, sh_region: {sh_region}")
                     self.traj_data[traj_num] = {
                         "ens_save_idx": ens_save_idx,
@@ -1260,7 +1259,10 @@ class REPEX_state_staple(REPEX_state):
             current_state_key = tuple(needstomove)
             if current_state_key in previous_states:
                 logger.warning("Detected potential infinite loop in sort_trajstate, using advanced resolution.")
+                logger.warning(f"Before deadlock resolution, state:\n{self.state}")
+                logger.warning(f"Needstomove pattern: {needstomove}")
                 self._resolve_deadlock()
+                logger.warning(f"After deadlock resolution, state:\n{self.state}")
                 break
             previous_states.append(current_state_key)
             
@@ -1306,86 +1308,55 @@ class REPEX_state_staple(REPEX_state):
         self.prob
 
     def _resolve_deadlock(self):
-        """Advanced deadlock resolution using backtracking algorithm."""
-        logger.info("Resolving deadlock using advanced permutation algorithm.")
+        """Simplified deadlock resolution - just swap problematic ensembles with valid ones."""
+        logger.info("Resolving deadlock using simple row swaps.")
         
-        # Build a map of which trajectories can go into which ensembles
         n_unlocked = self.n - 1
-        possible_swaps = {i: [] for i in range(n_unlocked)}
-        unlocked_paths = [
-            (i, traj.path_number)
-            for i, traj in enumerate(self._trajs[:-1])
-            if traj.path_number not in self.locked_paths()
-        ]
-        unlocked_indices = [item[0] for item in unlocked_paths]
-
+        locks = self.locked_paths()
+        
+        # Find problematic ensembles (diagonal = 0)
+        problematic_ensembles = []
         for ens_idx in range(n_unlocked):
-            for traj_idx in unlocked_indices:
-                if self.state[traj_idx, ens_idx] != 0:
-                    possible_swaps[ens_idx].append(traj_idx)
-
-        # Find a valid assignment using backtracking
-        assignment = [-1] * n_unlocked
-        used_trajectories = [False] * n_unlocked
-
-        def find_valid_assignment(ens_idx):
-            """Recursively find a valid trajectory for each ensemble."""
-            if ens_idx == n_unlocked:
-                return True  # All ensembles have been assigned a trajectory
-
-            for traj_idx in possible_swaps[ens_idx]:
-                if not used_trajectories[traj_idx]:
-                    assignment[ens_idx] = traj_idx
-                    used_trajectories[traj_idx] = True
-                    if find_valid_assignment(ens_idx + 1):
-                        return True
-                    # Backtrack
-                    used_trajectories[traj_idx] = False
-                    assignment[ens_idx] = -1
-            return False
-
-        if find_valid_assignment(0):
-            # Apply the solution using a series of swaps to maintain consistency
-            self._apply_permutation_via_swaps(assignment)
-            logger.info("Successfully resolved deadlock.")
-        else:
-            logger.error("FATAL: Could not find a valid permutation of trajectories.")
-            logger.error("This implies a deadlock that cannot be resolved.")
-            logger.error("Check your ensemble definitions and trajectory generation.")
-            # Continue anyway to prevent hard crash
-    
-    def _apply_permutation_via_swaps(self, assignment):
-        """Apply the permutation using the existing swap() method to maintain consistency."""
-        n_unlocked = self.n - 1
+            if self.state[ens_idx, ens_idx] == 0:
+                problematic_ensembles.append(ens_idx)
         
-        # Create a mapping of where each trajectory should go
-        current_positions = list(range(n_unlocked))
-        target_positions = assignment.copy()
+        logger.info(f"Problematic ensembles (diagonal = 0): {problematic_ensembles}")
         
-        # Perform a series of swaps to achieve the target permutation
-        # This is essentially a cycle decomposition approach
-        visited = [False] * n_unlocked
+        if not problematic_ensembles:
+            logger.info("No problematic ensembles found")
+            return
         
-        for start_idx in range(n_unlocked):
-            if visited[start_idx]:
-                continue
-                
-            # Follow the cycle starting from start_idx
-            current_idx = start_idx
-            cycle = []
+        # For each problematic ensemble, find a trajectory that can fix it
+        for ens_idx in problematic_ensembles:
+            logger.info(f"Fixing ensemble {ens_idx}")
             
-            while not visited[current_idx]:
-                visited[current_idx] = True
-                cycle.append(current_idx)
-                # Find where the trajectory at current_idx should go
-                target_idx = target_positions[current_idx]
-                current_idx = target_idx
-                
-            # Apply swaps for this cycle
-            if len(cycle) > 1:
-                # Perform swaps to rotate the cycle
-                for i in range(len(cycle) - 1):
-                    self.swap(cycle[i], cycle[i + 1])
+            # Find any trajectory that has non-zero weight for this ensemble
+            found_fix = False
+            for traj_idx in range(n_unlocked):
+                if (self._trajs[traj_idx].path_number not in locks and 
+                    self.state[traj_idx, ens_idx] != 0):
+                    # Simply swap this trajectory's row with the problematic ensemble
+                    logger.info(f"  Swapping rows: ensemble {ens_idx} ↔ trajectory {traj_idx}")
+                    self.swap(ens_idx, traj_idx)
+                    found_fix = True
+                    break
+            
+            if not found_fix:
+                logger.error(f"  No valid trajectories found for ensemble {ens_idx}")
+        
+        # Verify the fix
+        remaining_problems = []
+        for ens_idx in range(n_unlocked):
+            if self.state[ens_idx, ens_idx] == 0:
+                remaining_problems.append(ens_idx)
+        
+        if remaining_problems:
+            logger.error(f"Still have problems after simple swaps: {remaining_problems}")
+            logger.error("FATAL: Simple deadlock resolution failed.")
+            logger.error(f"self.state:\n{self.state}")
+            # Don't try complex backtracking - just report and continue
+        else:
+            logger.info("Successfully resolved deadlock with simple swaps!")
 
 def write_to_pathens(state, pn_archive):
     """Write data to infretis_data.txt."""

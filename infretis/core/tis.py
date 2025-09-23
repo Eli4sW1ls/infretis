@@ -139,11 +139,11 @@ def calc_cv_vector(
             return (1.0 if interfaces[0] <= path_max else 0.0,)
 
     if isinstance(path, StaplePath):
-        staple_ha = 1.
-        if (1 < path.pptype[0] < len(interfaces)-1 and path.pptype[1] in ["LML", "RMR"]) or (path.pptype[0] == 1 and path.pptype[1] == "RMR") \
-                or (path.pptype[0] == len(interfaces)-1 and path.pptype[1] == "LML"):
-            staple_ha = 0.5
-        elif len(interfaces)-1 <= path.pptype[0] or path.pptype[0] < 0:
+        # staple_ha = 1.
+        # if (1 < path.pptype[0] < len(interfaces)-1 and path.pptype[1] in ["LML", "RMR"]) or (path.pptype[0] == 1 and path.pptype[1] == "RMR") \
+        #         or (path.pptype[0] == len(interfaces)-1 and path.pptype[1] == "LML"):
+        #     staple_ha = 0.5
+        if len(interfaces)-1 <= path.pptype[0] or path.pptype[0] < 0:
             raise ValueError(f"Invalid path type ensemble: {path.pptype[0]}")
     for idx, intf_i in enumerate(interfaces[:-1]):
         if moves[idx + 1] == "wf":
@@ -151,10 +151,13 @@ def calc_cv_vector(
             intfs = [interfaces[0], intf_i, intf_cap]
             cv.append(compute_weight(path, intfs, moves[idx + 1]))
         elif isinstance(path, StaplePath):
-            if path.get_pptype(interfaces, [interfaces[max(0, idx - 1)], interfaces[idx], interfaces[idx + 1]]) != "***":
+            pptype_i = path.get_pptype(interfaces, [interfaces[max(0, idx - 1)], interfaces[idx], interfaces[idx + 1]])
+            if pptype_i != "***":
                 # print(f"pptype: {path.get_pptype(interfaces, [interfaces[max(0, idx - 1)], interfaces[idx], interfaces[idx + 1]])} in {idx}, {path.ordermax}, {path.ordermin}")
-                if path.pptype[0] == idx:
-                    cv.append(staple_ha)
+                if (pptype_i in ["LML", "RMR"] and 0 < idx <= len(interfaces)-2): 
+                # or (idx == 1 and pptype_i == "RMR") \
+                #         or (idx == len(interfaces)-2 and pptype_i == "LML"):
+                    cv.append(0.5)
                 else:
                     cv.append(1.0)
             else:
