@@ -793,15 +793,16 @@ def prepare_shooting_point(
             - The change in kinetic energy when modifying the velocities.
 
     """
-    if int(ens_set["ens_name"]) == 0 or isinstance(path, Path):
+    if int(ens_set["ens_name"]) == 0 or not isinstance(path, StaplePath):
         shooting_point, idx = path.get_shooting_point(rgen)
     else:
         sh_region_copy = path.sh_region.copy()
         for i in list(path.sh_region.keys()):
-            if int(ens_set["ens_name"]-1) != int(i):
-                path.sh_region.pop(i)
-        shooting_point, idx = path.get_shooting_point(rgen)
+            if int(ens_set["ens_name"]) - 1 != int(i):
+                sh_region_copy.pop(i)
         path.sh_region = sh_region_copy
+        logger.info(f"sh_region for ensemble {ens_set['ens_name']}: {path.sh_region}, instance: {type(path)}")
+        shooting_point, idx = path.get_shooting_point(rgen)
     orderp = shooting_point.order
     shpt_copy = shooting_point.copy()
     logger.info("Shooting from order parameter/index: %f, %d", orderp[0], idx)
@@ -842,6 +843,19 @@ def check_kick(
     # Check if the kick was too violent:
     left, _, right = interfaces
     if not left <= shooting_point.order[0] < right:
+        # log concise diagnostic for KOB
+        try:
+            ens_name = getattr(trial_path, 'generated', (None,))[0]
+        except Exception:
+            ens_name = None
+        logger.info(
+            "KOB: shooting_point.order=%s left=%s right=%s dek=%s generated=%s",
+            shooting_point.order[0],
+            left,
+            right,
+            dek,
+            ens_name,
+        )
         # Shooting point was velocity dependent and was kicked outside
         # of boundaries when modifying velocities.
         trial_path.append(shooting_point)
@@ -1770,6 +1784,9 @@ def staple_sh(
     if sh_region is None:
         sh_region = path.get_sh_region(ens_set["all_intfs"], intfs_pp)
         path.sh_region[int(ens_set["ens_name"])-1] = sh_region
+    else:
+        assert sh_region == path.get_sh_region(ens_set["all_intfs"], intfs_pp),\
+            "Stored shooting region does not match calculated one!"
     # the trial path we will generate
     trial_path = path.empty_path(maxlen=ens_set["tis_set"]["maxlength"])
     if shooting_point is None:
@@ -1783,6 +1800,19 @@ def staple_sh(
             shooting_point, idx, dek = prepare_shooting_point(
                 ppath, ens_set["rgen"], engine, ens_set
             )
+        # concise debug: ensemble id, path number, selected order, sh_region, dek
+        try:
+            pn = path.path_number
+        except Exception:
+            pn = None
+        logger.info(
+            "staple_sh: ens=%s path_number=%s sel_order=%s sh_region=%s dek=%s",
+            ens_set.get("ens_name"),
+            pn,
+            getattr(shooting_point, "order", (None,))[0],
+            sh_region,
+            dek,
+        )
         kick = check_kick(
             shooting_point, intfs_pp, trial_path, ens_set["rgen"], dek
         )
