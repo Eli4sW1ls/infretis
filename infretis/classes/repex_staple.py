@@ -146,8 +146,8 @@ class REPEX_state_staple(REPEX_state):
         row_sums = np.sum(out, axis=1, keepdims=True)
         row_sums[row_sums == 0] = 1.0  # Avoid division by zero for empty rows
         if np.any(row_sums > 0):
-            if np.any(row_sums > 1):
-                print(f"Warning: Row sums exceed 1: {out}")
+            # if np.any(row_sums > 1):
+                # print(f"Warning: Row sums exceed 1: {out}")
             out /= row_sums
         
         # 5. Re-insert rows/columns for locked ensembles

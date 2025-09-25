@@ -1785,8 +1785,15 @@ def staple_sh(
         sh_region = path.get_sh_region(ens_set["all_intfs"], intfs_pp)
         path.sh_region[int(ens_set["ens_name"])-1] = sh_region
     else:
-        assert sh_region == path.get_sh_region(ens_set["all_intfs"], intfs_pp),\
-            "Stored shooting region does not match calculated one!"
+        check_region = path.get_sh_region(ens_set["all_intfs"], intfs_pp)
+        if not (sh_region[0] == check_region[0] and sh_region[1] == check_region[1]):
+            # print("check log!")
+            logger.warning(f"Stored shooting region does not match calculated one! {sh_region} != {check_region}, {check_region[0]}, {check_region[1]}\
+                intfs: {intfs_pp}, path sh_region: {path.sh_region}, \norders of sh_region: { [p.order[0] for p in path.phasepoints[sh_region[0]:sh_region[1]+1]] } \
+                    \norders of check_region: { [p.order[0] for p in path.phasepoints[check_region[0]:check_region[1]+1]] }")
+            if int(ens_set["ens_name"]) != 1:
+                logger.error("This should not happen for TIS ensembles other than [1+]. Exiting.")
+                raise ValueError("Stored shooting region does not match calculated one!")
     # the trial path we will generate
     trial_path = path.empty_path(maxlen=ens_set["tis_set"]["maxlength"])
     if shooting_point is None:
