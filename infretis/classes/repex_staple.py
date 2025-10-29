@@ -402,7 +402,7 @@ class REPEX_state_staple(REPEX_state):
         perms = itertools.permutations(range(n))
         valid = []
         for p in perms:
-            if all(W[i, p[i]] != 0 for i in range(n)):    # diagonal-nonzero + row->ensemble validity
+            if all(arr[i, p[i]] != 0 for i in range(n)):    # diagonal-nonzero + row->ensemble validity
                 valid.append(p)
             # ok_forward = True
             # ok_diag = True
@@ -1308,55 +1308,155 @@ class REPEX_state_staple(REPEX_state):
         self.prob
 
     def _resolve_deadlock(self):
-        """Simplified deadlock resolution - just swap problematic ensembles with valid ones."""
-        logger.info("Resolving deadlock using simple row swaps.")
+        """Concise direct/cycle deadlock resolution for arbitrary matrices.
         
-        n_unlocked = self.n - 1
-        locks = self.locked_paths()
+        Uses a two-phase approach:
+        1. Try direct swaps first (simplest case)
+        2. For remaining problems, use small targeted permutations
         
-        # Find problematic ensembles (diagonal = 0)
-        problematic_ensembles = []
-        for ens_idx in range(n_unlocked):
-            if self.state[ens_idx, ens_idx] == 0:
-                problematic_ensembles.append(ens_idx)
+        This algorithm avoids complex backtracking while handling most cases.
+        """
+        logger.info("Attempting deadlock resolution...")
+        logger.info(f"Before deadlock resolution, state:\n{self.state}") 
+        n = self.n - 1  # Exclude ghost ensemble
         
-        logger.info(f"Problematic ensembles (diagonal = 0): {problematic_ensembles}")
+        # Get unlocked trajectories
+        unlocked_trajs = []
+        for i in range(n):
+            if self._locks[i] == 0:
+                unlocked_trajs.append(i)
         
-        if not problematic_ensembles:
-            logger.info("No problematic ensembles found")
+        # Stage 1: Simple swap strategy
+        logger.info("Stage 1: Trying simple swaps...")
+        problems = [i for i in range(n) if self._locks[i] == 0 and self.state[i, i] == 0]
+        
+        # Step 1: Find problematic ensembles (diagonal = 0)
+        for ens_idx in problems:
+            # Find any trajectory with non-zero weight for this ensemble
+            for traj_idx in unlocked_trajs:
+                if self.state[traj_idx, ens_idx] != 0 and self.state[ens_idx, traj_idx] != 0:
+                    logger.info(f"  Simple swap: {ens_idx} <-> {traj_idx}")
+                    self.swap(ens_idx, traj_idx)
+                    break
+        
+        # Check if simple swaps worked
+        problems_after = [i for i in range(n) if self._locks[i] == 0 and self.state[i, i] == 0]
+        if not problems_after:
+            logger.info("Simple swaps resolved deadlock!")
             return
         
-        # For each problematic ensemble, find a trajectory that can fix it
-        for ens_idx in problematic_ensembles:
-            logger.info(f"Fixing ensemble {ens_idx}")
-            
-            # Find any trajectory that has non-zero weight for this ensemble
-            found_fix = False
-            for traj_idx in range(n_unlocked):
-                if (self._trajs[traj_idx].path_number not in locks and 
-                    self.state[traj_idx, ens_idx] != 0):
-                    # Simply swap this trajectory's row with the problematic ensemble
-                    logger.info(f"  Swapping rows: ensemble {ens_idx} ↔ trajectory {traj_idx}")
-                    self.swap(ens_idx, traj_idx)
-                    found_fix = True
-                    break
-            
-            if not found_fix:
-                logger.error(f"  No valid trajectories found for ensemble {ens_idx}")
+        # Stage 2: Find valid permutation via backtracking
+        logger.warning(f"Simple swaps failed. Problems remain: {problems_after}")
+        logger.info("Stage 2: Searching for valid permutation...")
         
-        # Verify the fix
-        remaining_problems = []
-        for ens_idx in range(n_unlocked):
-            if self.state[ens_idx, ens_idx] == 0:
-                remaining_problems.append(ens_idx)
+        # Find first valid permutation using backtracking
+        # We build target_ens[traj] = ensemble where trajectory 'traj' should go
+        def find_valid_permutation(traj_pos, target_ens, used_ens):
+            """Find first valid permutation where state[traj, target_ens[traj]] != 0 for all unlocked traj."""
+            if traj_pos == n:
+                # All trajectories assigned, verify solution
+                for traj in range(n):
+                    if self._locks[traj] == 0 and self.state[traj, target_ens[traj]] == 0:
+                        return None
+                return target_ens[:]
+            
+            # Skip locked trajectories
+            if self._locks[traj_pos] > 0:
+                target_ens[traj_pos] = traj_pos  # Locked stays in place
+                return find_valid_permutation(traj_pos + 1, target_ens, used_ens)
+            
+            # Try all unlocked ensembles for this trajectory
+            for ens_idx in unlocked_trajs:  # These are the unlocked positions
+                if not used_ens[ens_idx] and self.state[traj_pos, ens_idx] != 0:
+                    target_ens[traj_pos] = ens_idx
+                    used_ens[ens_idx] = True
+                    result = find_valid_permutation(traj_pos + 1, target_ens, used_ens)
+                    if result is not None:
+                        return result
+                    used_ens[ens_idx] = False
+            
+            return None
         
-        if remaining_problems:
-            logger.error(f"Still have problems after simple swaps: {remaining_problems}")
-            logger.error("FATAL: Simple deadlock resolution failed.")
+        # Initialize and search
+        target_ens = [-1] * n  # target_ens[traj] = which ensemble trajectory 'traj' goes to
+        used_ensembles = [False] * n
+        
+        # Mark locked positions
+        for locked_idx in range(len(self._locks)):
+            if locked_idx < n and self._locks[locked_idx] > 0:
+                used_ensembles[locked_idx] = True
+                target_ens[locked_idx] = locked_idx  # Locked trajectory stays in its ensemble
+        
+        target_ens = find_valid_permutation(0, target_ens, used_ensembles)
+        
+        if target_ens is None:
+            logger.error("FATAL: No valid permutation exists!")
             logger.error(f"self.state:\n{self.state}")
-            # Don't try complex backtracking - just report and continue
-        else:
-            logger.info("Successfully resolved deadlock with simple swaps!")
+            logger.error(f"unlocked_trajs: {unlocked_trajs}")
+            logger.error(f"locked: {list(self._locks)}")
+            raise RuntimeError("Deadlock cannot be resolved - no valid permutation exists")
+        
+        logger.info(f"Found valid permutation: {target_ens}")
+        logger.info(f"  (target_ens[traj] = ensemble where trajectory 'traj' goes)")
+        
+        # Stage 3: Apply permutation via cycle decomposition
+        logger.info("Stage 3: Applying permutation via swaps...")
+        self._apply_permutation_via_swaps(target_ens)
+        
+        # Verify success
+        final_problems = [i for i in range(n) if i not in self._locks and self.state[i, i] == 0]
+        if final_problems:
+            logger.error(f"FATAL: Deadlock resolution failed. Problems: {final_problems}")
+            raise RuntimeError("Deadlock resolution failed")
+        
+        logger.info("Deadlock resolved successfully!")
+
+    def _apply_permutation_via_swaps(self, target_ens):
+        """Apply a permutation using cycle decomposition and swaps.
+        
+        Args:
+            target_ens: List where target_ens[traj] = ensemble where trajectory 'traj' should go
+        
+        The key insight:
+        - Currently: trajectory i is in position (ensemble) i
+        - Goal: trajectory i should be in position target_ens[i]
+        - swap(i, j) swaps the trajectories at positions i and j
+        
+        We need to compute the inverse permutation first:
+        - If target_ens[traj] = ens, then we want trajectory 'traj' at position 'ens'
+        - So position[ens] should have trajectory 'traj'
+        - This means: inv_perm[ens] = traj
+        """
+        n = len(target_ens)
+        
+        # Compute inverse permutation: which trajectory goes to each position
+        inv_perm = [-1] * n
+        for traj in range(n):
+            ens = target_ens[traj]
+            inv_perm[ens] = traj
+        
+        logger.debug(f"  Inverse permutation (which traj goes to each position): {inv_perm}")
+        
+        # Now apply cycles on the inverse permutation
+        visited = [False] * n
+        
+        for start in range(n):
+            if visited[start] or self._locks[start] > 0:
+                continue
+            
+            # Find cycle starting at position 'start'
+            cycle = []
+            current = start
+            while not visited[current]:
+                visited[current] = True
+                cycle.append(current)
+                current = inv_perm[current]
+            
+            # Apply cycle via swaps (if cycle length > 1)
+            if len(cycle) > 1:
+                logger.debug(f"  Applying cycle: {cycle}")
+                for i in range(len(cycle) - 1):
+                    self.swap(cycle[i], cycle[i + 1])
 
 def write_to_pathens(state, pn_archive):
     """Write data to infretis_data.txt."""
