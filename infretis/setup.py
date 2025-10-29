@@ -228,7 +228,6 @@ def check_config(config: dict) -> None:
     if n_workers > n_ens - 1:
         raise TOMLConfigError("Too many workers defined!")
 
-    print(intf, sorted(intf))
     if sorted(intf) != intf:
         raise TOMLConfigError("Your interfaces are not sorted!")
 

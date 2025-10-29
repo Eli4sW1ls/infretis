@@ -153,14 +153,7 @@ class REPEX_state_staple(REPEX_state):
         # 5. Re-insert rows/columns for locked ensembles
         final_out = np.zeros_like(input_mat, dtype="longdouble")
         final_out[np.ix_(live_indices, live_indices)] = out
-        # try:
-        #     out_repex = REPEX_state(self.config, minus=True).inf_retis(input_mat, locks)
-        # except Exception as e:
-        #     logger.info(f"Error occurred while calculating REPEX: {e}")
-        #     out_repex = np.zeros_like(input_mat, dtype="longdouble")
-        # print("locks:", locks)
-        # print("staple out:\n", final_out)
-        # print("repex out:\n", out_repex)
+        
         return final_out
 
     def add_traj(self, ens, traj, valid, count=True, n=0):
@@ -1258,11 +1251,11 @@ class REPEX_state_staple(REPEX_state):
             # Check for infinite loop by comparing current state
             current_state_key = tuple(needstomove)
             if current_state_key in previous_states:
-                logger.warning("Detected potential infinite loop in sort_trajstate, using advanced resolution.")
-                logger.warning(f"Before deadlock resolution, state:\n{self.state}")
-                logger.warning(f"Needstomove pattern: {needstomove}")
+                logger.info("Detected potential infinite loop in sort_trajstate, using advanced resolution.")
+                logger.info(f"Before deadlock resolution, state:\n{self.state}")
+                logger.info(f"Needstomove pattern: {needstomove}")
                 self._resolve_deadlock()
-                logger.warning(f"After deadlock resolution, state:\n{self.state}")
+                logger.info(f"After deadlock resolution, state:\n{self.state}")
                 break
             previous_states.append(current_state_key)
             
@@ -1346,7 +1339,7 @@ class REPEX_state_staple(REPEX_state):
             return
         
         # Stage 2: Find valid permutation via backtracking
-        logger.warning(f"Simple swaps failed. Problems remain: {problems_after}")
+        logger.info(f"Simple swaps failed. Problems remain: {problems_after}")
         logger.info("Stage 2: Searching for valid permutation...")
         
         # Find first valid permutation using backtracking
