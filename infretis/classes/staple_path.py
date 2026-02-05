@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 from numpy.typing import ArrayLike
+from itertools import zip_longest
 
 from infretis.classes.path import Path, DEFAULT_MAXLEN, _load_energies_for_path
 from infretis.classes.formatter import (
@@ -548,7 +549,7 @@ class StaplePath(Path):
                     vis = True
                     break
             if not vis:
-                print(f"Warning: No valid segment found in path with orders {orders} and pp_intfs {pp_intfs}. Returning full path.{poss_indices, valid_idx_list}")
+                logger.warning("No valid segment found in path with orders %s and pp_intfs %s. Returning full path: %s %s", orders, pp_intfs, poss_indices, valid_idx_list)
             if len(poss_indices) == 0:
                 raise ValueError("No valid segment found")
             left_border = valid_indices[0]
@@ -638,19 +639,11 @@ class StaplePath(Path):
                 len(self.phasepoints),
             )
             start = 1  # Skip first phase point if energies are one less than phasepoints
-        for i, phasepoint in enumerate(self.phasepoints[start:]):
-            try:
-                vpoti = vpot[i]
-            except IndexError:
-                logger.warning(
-                    "Ran out of potential energies, setting to None."
-                )
-                vpoti = None
-            try:
-                ekini = ekin[i]
-            except IndexError:
+        for phasepoint, (ekini, vpoti) in zip(self.phasepoints[start:], zip_longest(ekin, vpot, fillvalue=None)):
+            if vpoti is None:
+                logger.warning("Ran out of potential energies, setting to None.")
+            if ekini is None:
                 logger.warning("Ran out of kinetic energies, setting to None.")
-                ekini = None
             phasepoint.vpot = vpoti
             phasepoint.ekin = ekini
 

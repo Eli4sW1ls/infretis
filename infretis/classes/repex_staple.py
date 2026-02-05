@@ -232,15 +232,15 @@ class REPEX_state_staple(REPEX_state):
             return out_mat
 
         # For small matrices (< 5x5), optimization overhead isn't worth it
-        # if n < 5:
-        return self.permanent_prob(arr)
+        if n < 5:
+            return self.permanent_prob(arr)
         
         # For STAPLE matrices, check if we can use contiguous structure optimization
-        # if self._is_staple_structured(working_mat):
-        #     return self._contiguous_permanent_prob(arr)
-        # else:
-        #     # Fall back to standard permanent_prob for non-STAPLE structures
-        #     return self.permanent_prob(arr)
+        if self._is_staple_structured(working_mat):
+            return self._contiguous_permanent_prob(arr)
+        else:
+            # Fall back to standard permanent_prob for non-STAPLE structures
+            return self.permanent_prob(arr)
 
     def _is_staple_structured(self, working_mat):
         """Check if matrix has STAPLE structure: contiguous non-zero subsequences in each row."""

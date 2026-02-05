@@ -338,7 +338,7 @@ class TestStapleWorkflowEndToEnd:
         path.sh_region = {1: (1, 5)}
         
         ens_set = {
-            "interfaces": [0.15, 0.25, 0.35, 0.45],
+            "interfaces": [0.35, 0.4, 0.45],
             "all_intfs": [0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5],
             "ens_name": "1",
             "tis_set": {"maxlength": 50},  # Small limit to test constraints
