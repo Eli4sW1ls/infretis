@@ -806,8 +806,15 @@ def load_staple_path(pdir: str, lamb_A: float) -> StaplePath:
     # load ordertxt
     with OrderPathFile(ordertxt, "r") as orderfile:
         orderdata = next(orderfile.load())["data"][:, 1:]
-    if orderdata[0] > lamb_A and orderdata[1] <= lamb_A and orderdata[-2] <= lamb_A: # [0-]
-        # print("0-?: ", orderdata)
+    # orderdata may be 2D (multiple order parameters per frame); use primary component
+    if getattr(orderdata, "ndim", 0) > 1:
+        order_primary = orderdata[:, 0]
+    else:
+        order_primary = orderdata
+
+    # Ensure we have enough entries before indexing
+    if len(order_primary) > 2 and order_primary[0] > lamb_A and order_primary[1] <= lamb_A and order_primary[-2] <= lamb_A:  # [0-]
+        logger.debug("Detected [0-] path signature based on order parameters: %s", order_primary[:3])
         path = Path()
     else:
         path = StaplePath()
