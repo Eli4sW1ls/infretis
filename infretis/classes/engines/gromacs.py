@@ -602,7 +602,7 @@ class GromacsEngine(EngineBase):
     def set_mdrun(self, md_items: Dict[str, Any]) -> None:
         """Set the worker terminal command to execute."""
         base = md_items["wmdrun"]
-        self.mdrun = base + " -s {} -deffnm {} -c {}"
+        self.mdrun = base + " -s {} -deffnm {} -c {} -v"
         self.exe_dir = md_items["exe_dir"]
 
     def _read_configuration(
