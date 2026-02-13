@@ -154,10 +154,14 @@ def calc_cv_vector(
             pptype_i = path.get_pptype(interfaces, [interfaces[max(0, idx - 1)], interfaces[idx], interfaces[idx + 1]])
             if pptype_i != "***":
                 # print(f"pptype: {path.get_pptype(interfaces, [interfaces[max(0, idx - 1)], interfaces[idx], interfaces[idx + 1]])} in {idx}, {path.ordermax}, {path.ordermin}")
-                if (pptype_i in ["LML", "RMR"] and 0 < idx <= len(interfaces)-2): 
-                # or (idx == 1 and pptype_i == "RMR") \
-                #         or (idx == len(interfaces)-2 and pptype_i == "LML"):
-                    cv.append(0.5)
+                # Special-case: for LML paths in ensemble index 1 (i.e. the
+                # second ensemble) we treat the CV as fully assigned (1.0)
+                # instead of the usual 0.5 used for internal LML/RMR segments.
+                if (pptype_i in ["LML", "RMR"] and 0 < idx <= len(interfaces)-2):
+                    if idx == 1 and pptype_i == "LML":
+                        cv.append(1.0)
+                    else:
+                        cv.append(0.5)
                 else:
                     cv.append(1.0)
             else:

@@ -1009,8 +1009,11 @@ class REPEX_state_staple(REPEX_state):
                                     raise ValueError(
                                         f"Ensemble {ens_num} has invalid pptype {pptype}."
                                     )
-                                e_offset = np.random.choice([0, 1])
-                                s_offset = 1 - e_offset
+                                # Force start->end to be 0 -> 1 for ensemble 2 (no randomness)
+                                # e_offset = np.random.choice([0, 1])
+                                # s_offset = 1 - e_offset
+                                s_offset = 0
+                                e_offset = 1
                         elif ens_num == len(self.ensembles) - 2:
                             if pptype != "RMR":
                                 raise ValueError(
