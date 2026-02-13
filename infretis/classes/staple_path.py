@@ -813,7 +813,7 @@ def load_staple_path(pdir: str, lamb_A: float) -> StaplePath:
         order_primary = orderdata
 
     # Ensure we have enough entries before indexing
-    if len(order_primary) > 2 and np.count_nonzero(order_primary > lamb_A) <= 2 and order_primary[1] < lamb_A:  # [0-]
+    if len(order_primary) > 2 and np.count_nonzero(order_primary > lamb_A) <= 2 and order_primary[1] < lamb_A: # [0-]
         logger.debug("Detected [0-] path signature based on order parameters: %s", order_primary[:3])
         path = Path()
     else:
