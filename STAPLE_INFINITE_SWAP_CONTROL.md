@@ -39,6 +39,24 @@ steps = 10000
 staple_infinite_swap = true  # Enable infinite swap for STAPLE
 ```
 
+### Per-ensemble exclusion (disable infinite-swap for specific ensembles)
+You can enable infinite swap globally but exclude particular ensembles (for
+example `0+`) from participating in the infinite-swap permanent calculation.
+This is useful when a single ensemble should remain fixed while others still
+use infinite-swap mixing. The excluded ensemble(s) will behave as if they
+have an identity row in the P matrix (no infinite-swap for that ensemble).
+
+```toml
+[simulation]
+staple_infinite_swap = true
+# disable infinite-swap only for ensemble index 1 (i.e. [0+])
+staple_infinite_swap_exclude = [1]
+```
+
+Notes:
+- `staple_infinite_swap_exclude` accepts a list of ensemble indices (integers).
+- This does NOT disable regular `zero_swap` or local swap moves — it only
+  affects the infinite-swap permanent calculation.
 ## Implementation Details
 
 ### Code Changes

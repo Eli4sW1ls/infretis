@@ -278,6 +278,42 @@ class TestREPEXStateStaple:
             assert np.all(prob_matrix >= -1e-15), "All probabilities should be non-negative"
             assert np.all(np.isfinite(prob_matrix)), "All probabilities should be finite"
 
+    def test_infinite_swap_exclude_0plus(self, basic_config):
+        """When infinite-swap is enabled but ensemble `0+` (index 1) is excluded,
+        row 1 of the probability matrix must be identity while other rows
+        are computed normally."""
+        # Enable infinite swap but exclude ensemble index 1 (0+)
+        basic_config["simulation"]["staple_infinite_swap"] = True
+        basic_config["simulation"]["staple_infinite_swap_exclude"] = [1]
+
+        state = REPEX_state_staple(basic_config, minus=False)
+        state._locks = np.zeros(state.n, dtype=int)
+
+        # Prepare a non-trivial state matrix so `inf_retis` would normally
+        # produce off-diagonal probabilities (i.e. swapping allowed)
+        state.state = np.array([
+            [1.0, 0.5, 0.0, 0.0],
+            [0.5, 1.0, 0.5, 0.0],
+            [0.0, 0.5, 1.0, 0.0],
+            [0.0, 0.0, 0.0, 0.0],
+        ])
+
+        prob = state.prob
+        # Excluded ensemble row must be identity
+        np.testing.assert_allclose(prob[1, :], np.eye(state.n)[1, :], atol=1e-12)
+
+        # Matrix should remain a valid probability matrix
+        assert np.all(prob >= -1e-15)
+        assert np.all(np.isfinite(prob))
+
+        # At least one other row should not be a trivial identity row (i.e. swapping allowed)
+        other_rows_identity = [
+            np.allclose(prob[i, :], np.eye(state.n)[i, :], atol=1e-12)
+            for i in range(state.n)
+            if i != 1
+        ]
+        assert not all(other_rows_identity), "Other ensembles should still participate in infinite-swap when enabled"
+
     def test_locked_paths_handling(self, basic_config):
         """Test handling of locked paths."""
         state = REPEX_state_staple(basic_config, minus=False)

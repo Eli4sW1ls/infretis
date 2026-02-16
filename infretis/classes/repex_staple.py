@@ -39,6 +39,18 @@ class REPEX_state_staple(REPEX_state):
         # Set "staple_infinite_swap": true in config to re-enable infinite swap
         self.staple_infinite_swap = config.get("simulation", {}).get("staple_infinite_swap", False)
 
+        # Optional: exclude specific ensembles from infinite-swap even when
+        # `staple_infinite_swap` is enabled. Provide a list of ensemble indices
+        # (e.g. `[1]` to disable infinite-swap for ensemble `0+`).
+        ex_val = config.get("simulation", {}).get("staple_infinite_swap_exclude", [])
+        if isinstance(ex_val, int):
+            ex_val = [ex_val]
+        try:
+            self.staple_infinite_swap_exclude = set(int(x) for x in ex_val)
+        except Exception:
+            # fall back to empty set on bad config
+            self.staple_infinite_swap_exclude = set()
+
     @property
     def prob(self):
         """Calculate the P matrix for STAPLE.
@@ -63,6 +75,22 @@ class REPEX_state_staple(REPEX_state):
             if self._last_prob is None:
                 logger.info("STAPLE: Infinite swap ENABLED - using full permanent calculation")
                 prob = self.inf_retis(abs(self.state), self._locks)
+
+                # If user requested per-ensemble exclusion, force those ensemble
+                # rows to be identity (i.e. no infinite-swap for that ensemble)
+                if getattr(self, 'staple_infinite_swap_exclude', None):
+                    for ex in sorted(self.staple_infinite_swap_exclude):
+                        if 0 <= ex < prob.shape[0]:
+                            prob[ex, :] = 0.0
+                            prob[ex, ex] = 1.0
+                            logger.info(
+                                f"STAPLE: Infinite swap excluded for ensemble {ex} (forcing identity row)"
+                            )
+                        else:
+                            logger.warning(
+                                f"staple_infinite_swap_exclude contains invalid ensemble index {ex}"
+                            )
+
                 self._last_prob = prob.copy()
             return self._last_prob
 
