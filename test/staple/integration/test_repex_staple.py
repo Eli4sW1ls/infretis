@@ -289,16 +289,18 @@ class TestREPEXStateStaple:
         state = REPEX_state_staple(basic_config, minus=False)
         state._locks = np.zeros(state.n, dtype=int)
 
-        # Prepare a non-trivial state matrix so `inf_retis` would normally
-        # produce off-diagonal probabilities (i.e. swapping allowed)
+        # Prepare a non-trivial state matrix where ensembles 0 and 2
+        # remain directly connected even if ensemble 1 is excluded.
         state.state = np.array([
-            [1.0, 0.5, 0.0, 0.0],
+            [1.0, 0.5, 0.3, 0.0],
             [0.5, 1.0, 0.5, 0.0],
-            [0.0, 0.5, 1.0, 0.0],
+            [0.3, 0.5, 1.0, 0.0],
             [0.0, 0.0, 0.0, 0.0],
         ])
 
         prob = state.prob
+        print("Probability matrix with infinite swap enabled but ensemble 0+ excluded:")
+        print(prob)
         # Excluded ensemble row must be identity
         np.testing.assert_allclose(prob[1, :], np.eye(state.n)[1, :], atol=1e-12)
 
