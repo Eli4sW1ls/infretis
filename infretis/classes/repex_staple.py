@@ -74,22 +74,37 @@ class REPEX_state_staple(REPEX_state):
             # Use full infinite swap calculation from base REPEX class
             if self._last_prob is None:
                 logger.info("STAPLE: Infinite swap ENABLED - using full permanent calculation")
-                prob = self.inf_retis(abs(self.state), self._locks)
 
-                # If user requested per-ensemble exclusion, force those ensemble
-                # rows to be identity (i.e. no infinite-swap for that ensemble)
+                # Prepare locks for the permanent calculation so excluded
+                # ensembles do NOT participate in the `inf_retis` computation.
+                locks_for_inf = self._locks.copy()
+                valid_excludes = []
                 if getattr(self, 'staple_infinite_swap_exclude', None):
                     for ex in sorted(self.staple_infinite_swap_exclude):
-                        if 0 <= ex < prob.shape[0]:
-                            prob[ex, :] = 0.0
-                            prob[ex, ex] = 1.0
-                            logger.info(
-                                f"STAPLE: Infinite swap excluded for ensemble {ex} (forcing identity row)"
+                        # reject ghost ensemble exclusion (last index) and invalid indices
+                        if ex == self.n - 1:
+                            logger.warning(
+                                f"Ignoring staple_infinite_swap_exclude entry {ex}: cannot exclude ghost ensemble"
                             )
+                            continue
+                        if 0 <= ex < locks_for_inf.shape[0]:
+                            locks_for_inf[ex] = 1
+                            valid_excludes.append(ex)
                         else:
                             logger.warning(
                                 f"staple_infinite_swap_exclude contains invalid ensemble index {ex}"
                             )
+
+                # Run permanent calculation with excluded ensembles treated as locked
+                prob = self.inf_retis(abs(self.state), locks_for_inf)
+
+                # Force excluded ensemble rows to behave like identity rows
+                for ex in valid_excludes:
+                    prob[ex, :] = 0.0
+                    prob[ex, ex] = 1.0
+                    logger.info(
+                        f"STAPLE: Infinite swap excluded for ensemble {ex} (treated as locked during inf_retis)"
+                    )
 
                 self._last_prob = prob.copy()
             return self._last_prob
