@@ -2236,16 +2236,7 @@ def staple_swap_zero(
         path1 = path_tmp
         path1.append(system)
         logger.info("Skipping propagating for [0^+] from L")
-
-    ##### NB if path_ensemble1.last_path.get_move() != 'ld':
-    ##### NB     path0.set_move('s+')
-    ##### NB else:
-    ##### NB     path0.set_move('ld')
-
-    ##### NB if path_ensemble0.last_path.get_move() != 'ld':
-    ##### NB     path1.set_move('s-')
-    ##### NB else:
-    ##### NB     path1.set_move('ld')
+        
     if path1.length >= maxlen1:
         path1.status = "FTX"
     elif path1.length < 3:

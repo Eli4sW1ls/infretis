@@ -393,6 +393,79 @@ class TestStaplePath:
         with pytest.raises(AssertionError):
             path.get_pp_path(interfaces, pp_interfaces)
 
+    def test_get_pptype_maps_ens0_to_ens1_using_assigned_pptype(self):
+        """A pptype assigned in ensemble 0 must be used to map the same
+        path classification into ensemble 1 (swap-consistent mapping).
+        Example: (0,'LMR') -> when asked in ensemble 1 returns 'LML'.
+        """
+        path = StaplePath()
+        for pp in self.create_phasepoints():
+            path.append(pp)
+        intfs = [0.10, 0.20, 0.30, 0.40, 0.50]
+
+        # ensemble-0 (degenerate) triple: [intfs[0], intfs[0], intfs[1]]
+        pp_intfs_ens0 = [intfs[0], intfs[0], intfs[1]]
+        # ensemble-1 triple: [intfs[0], intfs[1], intfs[2]]
+        pp_intfs_ens1 = [intfs[0], intfs[1], intfs[2]]
+
+        path._cached_turn_info = ((True, 0, 2), (True, 1, 8), True)
+        path.pptype = (0, 'LMR')
+
+        # asking for ensemble 1 pptype must return the mapped value 'LML'
+        pptype_ens1 = path.get_pptype(intfs, pp_intfs_ens1)
+        assert pptype_ens1 == 'LML'
+
+    def test_get_pptype_maps_ens1_to_ens0_using_assigned_pptype(self):
+        """Reverse mapping: a pptype assigned in ensemble 1 must map back to
+        the expected pptype for ensemble 0 (e.g. (1,'LML') -> 'LMR')."""
+        path = StaplePath()
+        for pp in self.create_phasepoints():
+            path.append(pp)
+        intfs = [0.10, 0.20, 0.30, 0.40, 0.50]
+
+        pp_intfs_ens0 = [intfs[0], intfs[0], intfs[1]]
+        pp_intfs_ens1 = [intfs[0], intfs[1], intfs[2]]
+
+        path._cached_turn_info = ((True, 0, 2), (True, 1, 8), True)
+        path.pptype = (1, 'LML')
+
+        pptype_ens0 = path.get_pptype(intfs, pp_intfs_ens0)
+        assert pptype_ens0 == 'LMR'
+
+    def test_get_sh_region_allows_unambiguous_degenerate_without_pptype(self):
+        """Unambiguous degenerate [0*] may be resolved without stored pptype.
+        Only ambiguous degenerate cases (start_info[1] == end_info[1] == 0)
+        require a stored `pptype` (tested separately).
+        """
+        path = StaplePath()
+        for pp in self.create_phasepoints():
+            path.append(pp)
+        intfs = [0.10, 0.20, 0.30, 0.40, 0.50]
+        pp_intfs_ens0 = [intfs[0], intfs[0], intfs[1]]
+
+        # unambiguous turn-info (start != end) should not require stored pptype
+        path._cached_turn_info = ((True, 0, 2), (True, 1, 8), True)
+        path.pptype = None
+
+        sh = path.get_sh_region(intfs, pp_intfs_ens0)
+        assert isinstance(sh, tuple) and len(sh) == 2
+
+    def test_find_borders_raises_on_ambiguous_degenerate_without_pptype(self):
+        """Ambiguous degenerate [0*] with both turns on left requires pptype.""" 
+        path = StaplePath()
+        # craft a path and cached turn info that simulates start_info[1]==end_info[1]==0
+        for pp in self.create_phasepoints():
+            path.append(pp)
+        intfs = [0.10, 0.20, 0.30, 0.40, 0.50]
+        pp_intfs_deg = [intfs[0], intfs[0], intfs[1]]
+
+        # force ambiguous turn-info
+        path._cached_turn_info = ((True, 0, 2), (True, 0, 8), True)
+        path.pptype = None
+
+        with pytest.raises(ValueError):
+            path.get_sh_region(intfs, pp_intfs_deg)
+
     def test_get_shooting_point(self):
         """Test shooting point selection."""
         path = StaplePath(pptype="")

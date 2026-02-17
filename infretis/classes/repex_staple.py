@@ -1029,13 +1029,6 @@ class REPEX_state_staple(REPEX_state):
                 else:
                     st, end, valid = out_traj.check_turns(self.interfaces)
 
-                    # Simple override: if the detected start/end interface indices
-                    # are {0, 1} (i.e. path goes between interfaces 0 and 1 in any
-                    # direction), force classification to start=0 and end=1.
-                    if valid and st[1] is not None and end[1] is not None and {st[1], end[1]} == {0, 1}:
-                        st = (st[0], 0, st[2])
-                        end = (end[0], 1, end[2])
-
                     s_offset, e_offset = 0, 0
                     if not valid:
                         logger.warning(
@@ -1043,9 +1036,10 @@ class REPEX_state_staple(REPEX_state):
                         )
                         raise ValueError(f"Path does not have valid turns. {st}, {end}, {out_traj.get_orders_array()}")
                     if (out_traj.pptype is None or len(out_traj.pptype[1]) < 3):
+                        raise ValueError(f"Path does not have valid pptype, cannot load staple path. pptype: {out_traj.pptype}")
                         pptype = out_traj.get_pptype(self.interfaces, self.ensembles[ens_num + 1]['interfaces'])
                     else:
-                        assert out_traj.pptype[0] == ens_num
+                        assert out_traj.pptype[0] == ens_num, f"Ensemble number mismatch: expected {ens_num}, got {out_traj.pptype[0]}"
                         pptype = out_traj.pptype[1]
                     if ens_num not in out_traj.sh_region.keys() or len(out_traj.sh_region[ens_num]) != 2:
                         sh_region = out_traj.get_sh_region(self.interfaces, self.ensembles[ens_num + 1]['interfaces'])
@@ -1179,6 +1173,7 @@ class REPEX_state_staple(REPEX_state):
                 sh_region = (1, len(paths[i+1].phasepoints)-1)
             else:
                 pptype = paths[i+1].get_pptype(interfaces, self.ensembles[i + 1]['interfaces'])
+                paths[i + 1].pptype = (i, pptype)
                 sh_region = paths[i+1].get_sh_region(interfaces, self.ensembles[i + 1]['interfaces'])
             if i in [0, 1] and st[1] == end[1] == 0:
                 if i == 0:

@@ -327,10 +327,37 @@ class StaplePath(Path):
         # Simplified path extraction for common cases
         if len(intfs) <= 3:
             return self._determine_simple_pptype(pp_intfs)
-        
-        # For complex cases, use optimized border detection
-        # _, _, pptype = self._find_borders(start_info, end_info, pp_intfs)
+
+        # If the path already carries a `pptype` for ensemble 0 or 1,
+        # prefer using it to derive a swap-consistent pptype for the
+        # requested triple; *do not* require a stored pptype for every
+        # complex case (fallback deterministic logic remains available).
+        if len(intfs) > 3 and isinstance(self.pptype, tuple) and len(self.pptype) == 2 and self.pptype[0] in (0, 1):
+            stored_ens, stored_pt = self.pptype
+
+            # identify the target ensemble index for the requested pp_intfs
+            matches = np.where(np.isclose(interfaces, pp_intfs[1]))[0]
+            target_ens = int(matches[0]) if matches.size else None
+
+            # explicit user-requested mappings between ens 0 <-> 1
+            if stored_ens == 0 and stored_pt == "LMR" and target_ens == 1:
+                return "LML"
+            if stored_ens == 1 and stored_pt == "LML" and target_ens == 0:
+                return "LMR"
+
+            # generic interpretation: 'L' -> state 0 (A), 'R' -> state 1 (B)
+            def _pptype_to_states(pt: str) -> tuple[int, int]:
+                return (0 if pt[0] == "L" else 1, 0 if pt[2] == "L" else 1)
+
+            start_state, end_state = _pptype_to_states(stored_pt)
+            # map absolute start/end states back to L/R around the target ensemble
+            return ("L" if start_state == 0 else "R") + "M" + ("L" if end_state == 0 else "R")
+
         if pp_intfs[0] == pp_intfs[1] or start_info[1] == end_info[1]:
+            # Degenerate [0*] segments (pp_intfs[0] == pp_intfs[1]) must have
+            # an assigned `pptype` on the path for swap-consistent resolution.
+            if pp_intfs[0] == pp_intfs[1] and not (isinstance(self.pptype, tuple) and self.pptype[0] in (0, 1)):
+                raise UserWarning("StaplePath.pptype for ensemble 0 or 1 is required to determine pptype for degenerate [0*] segments")
             if start_info[1] == 0:
                 if self.ordermax[0] > pp_intfs[2]:
                     pptype = "LMR"
@@ -490,13 +517,39 @@ class StaplePath(Path):
                 left_border = 1
                 right_border = len(orders) - 2
             elif start_info[1] == end_info[1] == 0:
-                # Path starts and ends on the left side
-                pptype = np.random.choice(["LMR", "RML"])
-                if pptype == "LMR":
+                # Path starts and ends on the left side of the full interface set.
+                # Resolve the ambiguous/degenerate case using an assigned
+                # `pptype` on the path for ensemble 0 or 1 — this guarantees
+                # consistency for swapping. If not present, fail loudly.
+                if not (isinstance(self.pptype, tuple) and len(self.pptype) == 2 and self.pptype[0] in (0, 1)):
+                    raise ValueError("StaplePath.pptype (ensemble 0 or 1) required to resolve degenerate [0*] segment")
+
+                stored_ens, stored_pt = self.pptype
+                # reuse the same mapping rules as in `get_pptype`
+                def _pptype_to_states(pt: str, ens: int) -> tuple[int, int]:
+                    if pt == "LML" and ens == 1:
+                        return (0, 1)
+                    if pt == "LMR" and ens == 0:
+                        return (0, 1)
+                    if pt == "RML" and ens == 0:
+                        return (1, 0)
+                    raise ValueError("Invalid pptype for resolving degenerate [0*] segment: %s" % self.pptype)
+
+                start_state, end_state = _pptype_to_states(stored_pt, stored_ens)
+
+                # map resolved start/end into the borders and pptype
+                if (start_state, end_state) == (0, 1):
+                    pptype = "LMR"
                     left_border = 1
-                    right_border = next(i for i in range(start_extremal + 1, len(orders)) if orders[i] >= pp_intfs[2])-1
-                else:
+                    right_border = next(i for i in range(start_extremal + 1, len(orders)) if orders[i] >= pp_intfs[2]) - 1
+                elif (start_state, end_state) == (1, 0):
+                    pptype = "RML"
                     left_border = next(i for i in range(end_extremal - 1, -1, -1) if orders[i] >= pp_intfs[2]) + 1
+                    right_border = len(orders) - 2
+                else:
+                    # both endpoints on same absolute side -> full-path segment
+                    pptype = "LML" if start_state == 0 else "RMR"
+                    left_border = 1
                     right_border = len(orders) - 2
             elif start_info[1] == 0:
                 left_border = 1
