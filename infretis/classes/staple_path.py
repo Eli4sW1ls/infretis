@@ -357,7 +357,7 @@ class StaplePath(Path):
             # Degenerate [0*] segments (pp_intfs[0] == pp_intfs[1]) must have
             # an assigned `pptype` on the path for swap-consistent resolution.
             if pp_intfs[0] == pp_intfs[1] and not (isinstance(self.pptype, tuple) and self.pptype[0] in (0, 1)):
-                print("StaplePath.pptype for ensemble 0 or 1 is required to determine pptype for degenerate [0*] segments")
+                print("StaplePath.pptype for ensemble 0 or 1 is required to determine pptype for degenerate [0*] segments.", self.path_number)
             if start_info[1] == 0:
                 if self.ordermax[0] > pp_intfs[2]:
                     pptype = "LMR"
@@ -560,7 +560,7 @@ class StaplePath(Path):
                 right_border = len(orders) - 2
                 pptype = "LML" if left_border == 1 else "RML"
             else:
-                raise ValueError("Invalid extremal indices for ensemble [0*].")
+                raise ValueError("Invalid extremal indices for ensemble [0*].", start_info, end_info, [php.order[0] for php in self.phasepoints])
 
         elif pp_intfs[1] < orders[end_extremal] < pp_intfs[2]:  # LML end
             left_border = self._find_border_vectorized(orders, end_extremal, pp_intfs[0], 'leftl')
