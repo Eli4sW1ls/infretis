@@ -348,7 +348,7 @@ class StaplePath(Path):
         if pp_intfs[0] == pp_intfs[1] or start_info[1] == end_info[1]:
             # Degenerate [0*] segments (pp_intfs[0] == pp_intfs[1]) must have
             # an assigned `pptype` on the path for swap-consistent resolution.
-            if pp_intfs[0] == pp_intfs[1] and self.pptype[0] == 0:
+            if pp_intfs[0] == pp_intfs[1] and isinstance(self.pptype, tuple) and self.pptype[0] == 0:
                 print("StaplePath.pptype for ensemble 0 is required to determine pptype for degenerate [0*] segments.", self.path_number)
             if start_info[1] == 0:
                 if self.ordermax[0] > pp_intfs[2]:
