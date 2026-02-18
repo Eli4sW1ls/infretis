@@ -1161,11 +1161,6 @@ class REPEX_state_staple(REPEX_state):
         for i in range(size - 1):
             st, end, valid = paths[i+1].check_turns(interfaces)
 
-            # Force start/end to (0,1) for any path that spans interface indices 0 and 1
-            if valid and st[1] is not None and end[1] is not None and {st[1], end[1]} == {0, 1}:
-                st = (st[0], 0, st[2])
-                end = (end[0], 1, end[2])
-
             s_offset, e_offset = 0, 0
             if size <= 3:
                 chk_intf = paths[i+1].check_interfaces(self.ensembles[i + 1]['interfaces'])

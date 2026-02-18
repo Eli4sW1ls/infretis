@@ -328,31 +328,6 @@ class StaplePath(Path):
         if len(intfs) <= 3:
             return self._determine_simple_pptype(pp_intfs)
 
-        # If the path already carries a `pptype` for ensemble 0 or 1,
-        # prefer using it to derive a swap-consistent pptype for the
-        # requested triple; *do not* require a stored pptype for every
-        # complex case (fallback deterministic logic remains available).
-        if len(intfs) > 3 and isinstance(self.pptype, tuple) and len(self.pptype) == 2 and self.pptype[0] in (0, 1):
-            stored_ens, stored_pt = self.pptype
-
-            # identify the target ensemble index for the requested pp_intfs
-            matches = np.where(np.isclose(interfaces, pp_intfs[1]))[0]
-            target_ens = int(matches[0]) if matches.size else None
-
-            # explicit user-requested mappings between ens 0 <-> 1
-            if stored_ens == 0 and stored_pt == "LMR" and target_ens == 1:
-                return "LML"
-            if stored_ens == 1 and stored_pt == "LML" and target_ens == 0:
-                return "LMR"
-
-            # generic interpretation: 'L' -> state 0 (A), 'R' -> state 1 (B)
-            def _pptype_to_states(pt: str) -> tuple[int, int]:
-                return (0 if pt[0] == "L" else 1, 0 if pt[2] == "L" else 1)
-
-            start_state, end_state = _pptype_to_states(stored_pt)
-            # map absolute start/end states back to L/R around the target ensemble
-            return ("L" if start_state == 0 else "R") + "M" + ("L" if end_state == 0 else "R")
-
         if pp_intfs[0] == pp_intfs[1] or start_info[1] == end_info[1]:
             # Degenerate [0*] segments (pp_intfs[0] == pp_intfs[1]) must have
             # an assigned `pptype` on the path for swap-consistent resolution.

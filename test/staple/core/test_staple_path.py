@@ -177,6 +177,31 @@ class TestStaplePath:
             assert left_border >= -1
             assert right_border >= -1
 
+    def test_find_borders_fallback_when_no_valid_run(self):
+        """Ensure _find_borders handles the case where candidate indices exist
+        but no run contains the middle interface (previously caused UnboundLocalError).
+        """
+        path = StaplePath()
+        # Orders chosen so indices between left/right thresholds exist but
+        # do not contain the middle interface value inside their run
+        orders = [0.05, 0.12, 0.13, 0.14, 0.36]
+        for i, order in enumerate(orders):
+            sys = System()
+            sys.order = [order]
+            sys.config = (f"fb_{i}.xyz", i)
+            path.append(sys)
+
+        # Provide start/end extremal indices that include the candidate indices
+        start_info = (True, 1, 1)
+        end_info = (True, 3, 3)
+        pp_intfs = [0.10, 0.20, 0.30]
+
+        # Should not raise UnboundLocalError and should return sensible borders
+        left, right, pptype = path._find_borders(start_info, end_info, pp_intfs)
+        assert isinstance(left, int) and isinstance(right, int)
+        assert left <= right
+        assert isinstance(pptype, str)
+
     def create_phasepoints(self):
         """Create test phasepoints for a valid staple path with a proper turn."""
         # Create a forward turn around interface 2 (0.25) with interfaces [0.15, 0.25, 0.35, 0.45]
