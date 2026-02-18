@@ -312,7 +312,24 @@ class StaplePath(Path):
         assert str(list(dict.fromkeys(pp_intfs)))[1:-1] in str(intfs)[1:-1], f"Invalid interface indices: {intfs, pp_intfs}"
             
         interfaces = np.array(intfs)
-        
+
+        # Fast-path: if the path already carries a `pptype` for the
+        # exact ensemble corresponding to `pp_intfs[1]`, return it
+        # immediately (skip expensive turn/border computation).
+        try:
+            matches = np.where(np.isclose(interfaces, pp_intfs[1]))[0]
+            target_ens = int(matches[0]) if matches.size else None
+        except Exception:
+            target_ens = None
+
+        if (
+            isinstance(self.pptype, tuple)
+            and len(self.pptype) == 2
+            and target_ens is not None
+            and self.pptype[0] == target_ens
+        ):
+            return self.pptype[1]
+
         # Use cached turn information if available
         if self._cached_turn_info is None:
             start_info, end_info, valid = self.check_turns(interfaces)
@@ -331,8 +348,8 @@ class StaplePath(Path):
         if pp_intfs[0] == pp_intfs[1] or start_info[1] == end_info[1]:
             # Degenerate [0*] segments (pp_intfs[0] == pp_intfs[1]) must have
             # an assigned `pptype` on the path for swap-consistent resolution.
-            if pp_intfs[0] == pp_intfs[1] and not (isinstance(self.pptype, tuple) and self.pptype[0] in (0, 1)):
-                print("StaplePath.pptype for ensemble 0 or 1 is required to determine pptype for degenerate [0*] segments.", self.path_number)
+            if pp_intfs[0] == pp_intfs[1] and self.pptype[0] == 0:
+                print("StaplePath.pptype for ensemble 0 is required to determine pptype for degenerate [0*] segments.", self.path_number)
             if start_info[1] == 0:
                 if self.ordermax[0] > pp_intfs[2]:
                     pptype = "LMR"
