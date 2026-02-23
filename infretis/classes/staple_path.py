@@ -10,6 +10,16 @@ import numpy as np
 from numpy.typing import ArrayLike
 from itertools import zip_longest
 
+from infretis.tools.performance_profiler import global_profiler
+
+
+def profiled(fn):
+    def wrapper(*args, **kwargs):
+        with global_profiler.profile_operation(fn.__name__,
+                                              path_length=getattr(args[0], 'length', 0)):
+            return fn(*args, **kwargs)
+    return wrapper
+
 from infretis.classes.path import Path, DEFAULT_MAXLEN, _load_energies_for_path
 from infretis.classes.formatter import (
     EnergyPathFile,
@@ -58,6 +68,7 @@ class StaplePath(Path):
         
         return self._cached_orders
     
+    @profiled
     def check_turns(self, interfaces: List[float]) -> Tuple[
         Tuple[bool, Optional[int], Optional[int]],
         Tuple[bool, Optional[int], Optional[int]],  
@@ -301,6 +312,7 @@ class StaplePath(Path):
         logger.debug(f"Selected point with orderp {self.phasepoints[idx].order[0]}")
         return self.phasepoints[idx], idx
 
+    @profiled
     def get_pptype(self, intfs: List[float], pp_intfs: List[float]) -> str:
         """Determine the 3-character pptype for the path."""
         # Early validation
@@ -391,6 +403,7 @@ class StaplePath(Path):
         
         return pptype
 
+    @profiled
     def get_sh_region(self, intfs: List[float], pp_intfs: List[float]) -> Tuple[int, int]:
         """Determine the shooting region (left_border, right_border) for the path."""
         # Early validation
@@ -692,6 +705,7 @@ class StaplePath(Path):
             phasepoint.vpot = vpoti
             phasepoint.ekin = ekini
 
+    @profiled
     def copy(self) -> Path:
         """Return a copy of this path."""
         
@@ -764,7 +778,8 @@ class StaplePath(Path):
         result = super().append(system)
         self._invalidate_cache()
         return result
-
+    
+@profiled
 def turn_detected(orders: np.ndarray, interfaces: List[float], m_idx: int, lr: int) -> bool:
     """Check if a turn is detected in the given order parameters.
 

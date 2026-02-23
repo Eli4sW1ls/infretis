@@ -14,6 +14,16 @@ import matplotlib.pyplot as plt
 from scipy.sparse.csgraph import connected_components
 
 from infretis.classes.repex import REPEX_state, spawn_rng
+from infretis.tools.performance_profiler import global_profiler
+
+
+# simple decorator to wrap expensive methods
+
+def profiled(fn):
+    def wrapper(*args, **kwargs):
+        with global_profiler.profile_operation(fn.__name__):
+            return fn(*args, **kwargs)
+    return wrapper
 from infretis.classes.engines.factory import assign_engines
 from infretis.classes.formatter import PathStorage
 from infretis.core.core import make_dirs
@@ -138,6 +148,7 @@ class REPEX_state_staple(REPEX_state):
         blocks.sort(key=lambda b: b[0])
         return blocks
 
+    @profiled
     def inf_retis(self, input_mat, locks):
         """
         Permanent calculator for STAPLE, optimized with robust block detection.
@@ -203,6 +214,7 @@ class REPEX_state_staple(REPEX_state):
         
         return final_out
 
+    @profiled
     def add_traj(self, ens, traj, valid, count=True, n=0):
         """Add traj to state and calculate P matrix.
         
@@ -226,6 +238,7 @@ class REPEX_state_staple(REPEX_state):
             # Use full infinite swap behavior from base class
             super().add_traj(ens, traj, valid, count, n)
 
+    @profiled
     def permanent_prob(self, arr):
         """P matrix calculation for specific W matrix."""
         out = np.zeros(shape=arr.shape, dtype="longdouble")
@@ -258,6 +271,7 @@ class REPEX_state_staple(REPEX_state):
             return out / max_row_sum
         return out
 
+    @profiled
     def quick_prob(self, arr):
         """Optimized quick P matrix calculation leveraging STAPLE's contiguous row structure."""
         # STAPLE property: each row has exactly one contiguous subsequence of non-zeros
@@ -467,6 +481,7 @@ class REPEX_state_staple(REPEX_state):
 
         return P
 
+    @profiled
     def random_prob(self, arr, n=10_000):
         """P matrix calculation for specific W matrix."""
         out = np.eye(len(arr), dtype="longdouble")
@@ -987,6 +1002,7 @@ class REPEX_state_staple(REPEX_state):
             )
             logger.info(f"{key:03.0f} * {values} *")
 
+    @profiled
     def treat_output(self, md_items):
         """Treat output."""
         pn_news = []
@@ -1279,6 +1295,7 @@ class REPEX_state_staple(REPEX_state):
 
         self.ensembles = pensembles
 
+    @profiled
     def sort_trajstate(self):
         """Sort trajs and calculate P matrix.
         
@@ -1354,6 +1371,7 @@ class REPEX_state_staple(REPEX_state):
         self._last_prob = None
         self.prob
 
+    @profiled
     def _resolve_deadlock(self):
         """Concise direct/cycle deadlock resolution for arbitrary matrices.
         

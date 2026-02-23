@@ -18,6 +18,8 @@ from typing import Dict, List, Tuple, Any, Callable
 from contextlib import contextmanager
 from dataclasses import dataclass
 import numpy as np
+from datetime import datetime
+import threading
 
 from infretis.classes.staple_path import StaplePath, turn_detected
 from infretis.classes.system import System
@@ -153,7 +155,7 @@ class StaplePerformanceProfiler:
         # Create large path
         orders = create_large_staple_path(interfaces, n_cycles=path_length // 20)[:path_length]
         add_systems_to_path(path, orders, "shooting_profile")
-        path.sh_region = (100, path_length - 100)
+        path.sh_region = {100: path_length - 100}
         
         rgen = np.random.default_rng(42)
         
@@ -313,7 +315,7 @@ class StaplePerformanceProfiler:
         report.append(f"Most memory usage: {most_memory.operation_name} ({most_memory.memory_peak:.2f} MB)")
         
         return "\n".join(report)
-    
+
     def save_results_csv(self, filename: str):
         """Save results to CSV for further analysis."""
         import csv
@@ -332,6 +334,30 @@ class StaplePerformanceProfiler:
                     result.cpu_percent,
                     result.path_length
                 ])
+
+
+# ------------------------------------------------------------------
+# Global profiler and periodic reporting
+# ------------------------------------------------------------------
+
+global_profiler: StaplePerformanceProfiler = StaplePerformanceProfiler()
+
+
+def start_periodic_reports(interval: float = 300.0):
+    """
+    Print a summary of profiling results every `interval` seconds.
+
+    This function schedules itself on a background timer and uses the
+    `global_profiler` singleton. Call once at startup.
+    """
+    def _report():
+        print("\n" + "=" * 80)
+        print(f"[{datetime.now():%Y.%m.%d %H:%M:%S}] stapler performance report")
+        print(global_profiler.generate_report())
+        print("=" * 80 + "\n")
+        threading.Timer(interval, _report).start()
+
+    _report()
 
 
 def run_comprehensive_profiling():
