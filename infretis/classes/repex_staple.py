@@ -183,7 +183,17 @@ class REPEX_state_staple(REPEX_state):
             
             prob_matrix = np.zeros_like(sub_matrix, dtype="longdouble")
             
-            with global_profiler.profile_operation("inf_retis:block", additional_data={"size": sub_matrix.shape[0]}):
+            # determine which algorithm will be used
+            if sub_matrix.shape[0] == 1:
+                algo = "trivial"
+            elif np.all(np.isclose(sub_matrix, sub_matrix[0, :]) | (sub_matrix == 0)):
+                algo = "quick"
+            elif sub_matrix.shape[0] <= 12:
+                algo = "glynn"
+            else:
+                algo = "random"
+
+            with global_profiler.profile_operation("inf_retis:block", additional_data={"size": sub_matrix.shape[0], "algo": algo}):
                 # Heuristics for choosing the best permanent algorithm
                 if sub_matrix.shape[0] == 1:
                     prob_matrix = np.array([[1.0]])
