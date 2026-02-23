@@ -978,14 +978,10 @@ class REPEX_state_staple(REPEX_state):
                         if len(marker) == 3:
                             marker = "9 "
                     to_print += marker
-                # append trajectory info if available
-                if live in self.traj_data:
-                    to_print += f"|\t{self.traj_data[live]['max_op'][0]:5.3f} \t"
-                    to_print += f"{self.traj_data[live]['min_op'][0]:5.3f} \t"
-                    to_print += f"{self.traj_data[live]['length']:5.0f}"
-                else:
-                    to_print += "|\t----\t----\t----"
-                    logger.warning(f"print_state: missing traj_data for live {live}")
+                    
+                to_print += f"|\t{self.traj_data[live]['max_op'][0]:5.3f} \t"
+                to_print += f"{self.traj_data[live]['min_op'][0]:5.3f} \t"
+                to_print += f"{self.traj_data[live]['length']:5.0f}"
                 logger.info(to_print)
             else:
                 to_print = f"p{live:02.0f} |\t"
@@ -1167,11 +1163,7 @@ class REPEX_state_staple(REPEX_state):
             self.prob
         for idx, live in enumerate(self.live_paths()):
             if live not in locked_trajs:
-                if live in self.traj_data:
-                    self.traj_data[live]["frac"] += self._last_prob[:-1][idx, :]
-                else:
-                    # trajectory missing from traj_data (e.g. deleted on restart)
-                    logger.warning(f"Skipping frac update for unknown traj {live}")
+                self.traj_data[live]["frac"] += self._last_prob[:-1][idx, :]
 
         # write succ data to infretis_data.txt
         if md_items["status"] == "ACC":
