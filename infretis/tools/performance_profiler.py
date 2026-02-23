@@ -21,7 +21,7 @@ import numpy as np
 from datetime import datetime
 import threading
 
-from infretis.classes.staple_path import StaplePath, turn_detected
+from infretis.classes.staple_path import *
 from infretis.classes.system import System
 
 # Fallback utility functions if staple_path_utils not available
