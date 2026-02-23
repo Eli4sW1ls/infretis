@@ -1027,13 +1027,20 @@ class REPEX_state_staple(REPEX_state):
                 out_traj = picked[ens_num]["traj"]
                 self.ensembles[ens_num + 1] = picked[ens_num]["ens"]
 
+                # ensure we always have an ens_save_idx (may be missing after restart)
+                ens_save_idx = None
+                if pn_old in self.traj_data:
+                    ens_save_idx = self.traj_data[pn_old].get("ens_save_idx")
+
                 for idx, lock in enumerate(self.locked):
                     if str(pn_old) in lock[1]:
                         self.locked.pop(idx)
                 # if path is new: number and save the path:
                 if out_traj.path_number is None or md_items["status"] == "ACC":
                     # move to accept:
-                    ens_save_idx = self.traj_data[pn_old]["ens_save_idx"]
+                    if ens_save_idx is None:
+                        # fallback to old entry (should exist unless data corrupted)
+                        ens_save_idx = self.traj_data.get(pn_old, {}).get("ens_save_idx")
                     out_traj.path_number = traj_num
                     data = {
                         "path": out_traj,
@@ -1056,6 +1063,8 @@ class REPEX_state_staple(REPEX_state):
                     }
                 else:
                     with global_profiler.profile_operation("treat_output:turns_and_regions"):
+                        if ens_save_idx is None:
+                            ens_save_idx = self.traj_data.get(pn_old, {}).get("ens_save_idx", ens_num)
                         st, end, valid = out_traj.check_turns(self.interfaces)
 
                         s_offset, e_offset = 0, 0
