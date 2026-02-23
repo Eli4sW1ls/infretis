@@ -1077,7 +1077,7 @@ class REPEX_state_staple(REPEX_state):
                             raise ValueError(f"Path does not have valid pptype, cannot load staple path. pptype: {out_traj.pptype}")
                             pptype = out_traj.get_pptype(self.interfaces, self.ensembles[ens_num + 1]['interfaces'])
                         else:
-                            assert out_traj.pptype[0] == ens_num, f"Ensemble number mismatch: expected {ens_num}, got {out_traj.pptype[0]}"
+                            assert out_traj.pptype[0]+1 == ens_num, f"Ensemble number mismatch: expected {ens_num}, got {out_traj.pptype[0]+1}"
                             pptype = out_traj.pptype[1]
                         if ens_num not in out_traj.sh_region.keys() or len(out_traj.sh_region[ens_num]) != 2:
                             sh_region = out_traj.get_sh_region(self.interfaces, self.ensembles[ens_num + 1]['interfaces'])
