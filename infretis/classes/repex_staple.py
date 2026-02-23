@@ -167,8 +167,8 @@ class REPEX_state_staple(REPEX_state):
         binary_mat = np.where(live_mat != 0, 1, 0)
         # print("live matrix:\n", live_mat)
         # print("Binary matrix:\n", binary_mat)
-        
-        blocks = self.find_blocks(binary_mat)
+        with global_profiler.profile_operation("inf_retis:find_blocks"):
+            blocks = self.find_blocks(binary_mat)
         
         out = np.zeros_like(live_mat, dtype="longdouble")
 
@@ -183,19 +183,20 @@ class REPEX_state_staple(REPEX_state):
             
             prob_matrix = np.zeros_like(sub_matrix, dtype="longdouble")
             
-            # Heuristics for choosing the best permanent algorithm
-            if sub_matrix.shape[0] == 1:
-                prob_matrix = np.array([[1.0]])
-            elif np.all(np.isclose(sub_matrix, sub_matrix[0, :]) | (sub_matrix == 0)):
-                prob_matrix = self.quick_prob(sub_matrix)
-            elif sub_matrix.shape[0] <= 12:
-                # Use exact Glynn formula for small matrices
-                prob_matrix = self.permanent_prob(sub_matrix)
-            else:
-                # Fallback to probabilistic method for large, complex matrices
-                self._random_count += 1
-                logger.info(f"Using random method for block of size {sub_matrix.shape[0]}")
-                prob_matrix = self.random_prob(sub_matrix)
+            with global_profiler.profile_operation("inf_retis:block", additional_data={"size": sub_matrix.shape[0]}):
+                # Heuristics for choosing the best permanent algorithm
+                if sub_matrix.shape[0] == 1:
+                    prob_matrix = np.array([[1.0]])
+                elif np.all(np.isclose(sub_matrix, sub_matrix[0, :]) | (sub_matrix == 0)):
+                    prob_matrix = self.quick_prob(sub_matrix)
+                elif sub_matrix.shape[0] <= 12:
+                    # Use exact Glynn formula for small matrices
+                    prob_matrix = self.permanent_prob(sub_matrix)
+                else:
+                    # Fallback to probabilistic method for large, complex matrices
+                    self._random_count += 1
+                    logger.info(f"Using random method for block of size {sub_matrix.shape[0]}")
+                    prob_matrix = self.random_prob(sub_matrix)
 
             # Place the calculated probability matrix into the correct block of the output matrix
             out[np.ix_(block_indices, block_indices)] = prob_matrix
@@ -1011,28 +1012,29 @@ class REPEX_state_staple(REPEX_state):
         traj_num = self.config["current"]["traj_num"]
 
         for ens_num in picked.keys():
-            pn_old = picked[ens_num]["pn_old"]
-            out_traj = picked[ens_num]["traj"]
-            self.ensembles[ens_num + 1] = picked[ens_num]["ens"]
+            with global_profiler.profile_operation("treat_output:ensemble", additional_data={"ens": ens_num}):
+                pn_old = picked[ens_num]["pn_old"]
+                out_traj = picked[ens_num]["traj"]
+                self.ensembles[ens_num + 1] = picked[ens_num]["ens"]
 
-            for idx, lock in enumerate(self.locked):
-                if str(pn_old) in lock[1]:
-                    self.locked.pop(idx)
-            # if path is new: number and save the path:
-            if out_traj.path_number is None or md_items["status"] == "ACC":
-                # move to accept:
-                ens_save_idx = self.traj_data[pn_old]["ens_save_idx"]
-                out_traj.path_number = traj_num
-                data = {
-                    "path": out_traj,
-                    "dir": os.path.join(
-                        os.getcwd(), self.config["simulation"]["load_dir"]
-                    ),
-                }
-                out_traj = self.pstore.output(self.cstep, data)
-                if ens_num <= -1:
-                    chk_intf = out_traj.check_interfaces(self.ensembles[ens_num + 1]['interfaces'])
-                    self.traj_data[traj_num] = {
+                for idx, lock in enumerate(self.locked):
+                    if str(pn_old) in lock[1]:
+                        self.locked.pop(idx)
+                # if path is new: number and save the path:
+                if out_traj.path_number is None or md_items["status"] == "ACC":
+                    # move to accept:
+                    ens_save_idx = self.traj_data[pn_old]["ens_save_idx"]
+                    out_traj.path_number = traj_num
+                    data = {
+                        "path": out_traj,
+                        "dir": os.path.join(
+                            os.getcwd(), self.config["simulation"]["load_dir"]
+                        ),
+                    }
+                    out_traj = self.pstore.output(self.cstep, data)
+                    if ens_num <= -1:
+                        chk_intf = out_traj.check_interfaces(self.ensembles[ens_num + 1]['interfaces'])
+                        self.traj_data[traj_num] = {
                         "frac": np.zeros(self.n, dtype="longdouble"),
                         "max_op": out_traj.ordermax,
                         "min_op": out_traj.ordermin,
@@ -1043,25 +1045,26 @@ class REPEX_state_staple(REPEX_state):
                         "ptype": str((chk_intf[0] if chk_intf[0] is not None else "") + chk_intf[2] + (chk_intf[1] if chk_intf[1] is not None else "")),
                     }
                 else:
-                    st, end, valid = out_traj.check_turns(self.interfaces)
+                    with global_profiler.profile_operation("treat_output:turns_and_regions"):
+                        st, end, valid = out_traj.check_turns(self.interfaces)
 
-                    s_offset, e_offset = 0, 0
-                    if not valid:
-                        logger.warning(
-                            "Path does not have valid turns, cannot load staple path."
-                        )
-                        raise ValueError(f"Path does not have valid turns. {st}, {end}, {out_traj.get_orders_array()}")
-                    if (out_traj.pptype is None or len(out_traj.pptype[1]) < 3):
-                        raise ValueError(f"Path does not have valid pptype, cannot load staple path. pptype: {out_traj.pptype}")
-                        pptype = out_traj.get_pptype(self.interfaces, self.ensembles[ens_num + 1]['interfaces'])
-                    else:
-                        assert out_traj.pptype[0] == ens_num, f"Ensemble number mismatch: expected {ens_num}, got {out_traj.pptype[0]}"
-                        pptype = out_traj.pptype[1]
-                    if ens_num not in out_traj.sh_region.keys() or len(out_traj.sh_region[ens_num]) != 2:
-                        sh_region = out_traj.get_sh_region(self.interfaces, self.ensembles[ens_num + 1]['interfaces'])
-                        out_traj.sh_region[ens_num] = sh_region
-                    else:
-                        sh_region = out_traj.sh_region[ens_num]
+                        s_offset, e_offset = 0, 0
+                        if not valid:
+                            logger.warning(
+                                "Path does not have valid turns, cannot load staple path."
+                            )
+                            raise ValueError(f"Path does not have valid turns. {st}, {end}, {out_traj.get_orders_array()}")
+                        if (out_traj.pptype is None or len(out_traj.pptype[1]) < 3):
+                            raise ValueError(f"Path does not have valid pptype, cannot load staple path. pptype: {out_traj.pptype}")
+                            pptype = out_traj.get_pptype(self.interfaces, self.ensembles[ens_num + 1]['interfaces'])
+                        else:
+                            assert out_traj.pptype[0] == ens_num, f"Ensemble number mismatch: expected {ens_num}, got {out_traj.pptype[0]}"
+                            pptype = out_traj.pptype[1]
+                        if ens_num not in out_traj.sh_region.keys() or len(out_traj.sh_region[ens_num]) != 2:
+                            sh_region = out_traj.get_sh_region(self.interfaces, self.ensembles[ens_num + 1]['interfaces'])
+                            out_traj.sh_region[ens_num] = sh_region
+                        else:
+                            sh_region = out_traj.sh_region[ens_num]
                     if st[1] == end[1]:
                         if ens_num in [0, 1]: 
                             if ens_num == 0:
