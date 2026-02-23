@@ -1162,7 +1162,11 @@ class REPEX_state_staple(REPEX_state):
             self.prob
         for idx, live in enumerate(self.live_paths()):
             if live not in locked_trajs:
-                self.traj_data[live]["frac"] += self._last_prob[:-1][idx, :]
+                if live in self.traj_data:
+                    self.traj_data[live]["frac"] += self._last_prob[:-1][idx, :]
+                else:
+                    # trajectory missing from traj_data (e.g. deleted on restart)
+                    logger.warning(f"Skipping frac update for unknown traj {live}")
 
         # write succ data to infretis_data.txt
         if md_items["status"] == "ACC":
