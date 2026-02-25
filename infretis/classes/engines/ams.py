@@ -10,6 +10,7 @@ Important classes defined here
 AMSEngine (:py:class:`.AMSEngine`)
     A class responsible for interfacing AMS.
 """
+
 import copy
 import logging
 import os
@@ -69,7 +70,7 @@ class AMSEngine(EngineBase):  # , metaclass=Singleton):
         super().__init__("AMS engine", timestep, subcycles)
         self.ext = "rkf"
 
-        # Units of AMS output, must correspond to set PyRETIS units
+        # Units of AMS output, must correspond to set infRETIS units
         self.ene_unit = "kJ/mol"
         self.dist_unit = "nm"
         self.time_unit = "ps"
@@ -85,6 +86,7 @@ class AMSEngine(EngineBase):  # , metaclass=Singleton):
 
         # Add input path and the input files:
         self.input_path = os.path.abspath(input_path)
+        self.set_idx = False
 
         # Expected input files
         self.input_files = {
@@ -94,8 +96,35 @@ class AMSEngine(EngineBase):  # , metaclass=Singleton):
         # Read AMS input
         inpf = os.path.join(self.input_path, self.input_files["input"])
         inp = open(inpf).read()
+        # extract input geometry
+        geometry_file_line = next(
+            (line for line in inp.splitlines() if "GeometryFile" in line), None
+        )
+        if geometry_file_line is not None:
+            geometry_file_path = geometry_file_line.split()[-1].strip()
+            # get absolute path as string
+            geometry_file_path = str(
+                os.path.abspath(
+                    os.path.join(self.input_path, geometry_file_path)
+                )
+            )
+            if "traj" in os.path.basename(geometry_file_path):
+                print("ERROR: GeometryFile is not allowed to contain 'traj'")
+                print(f"Extracted GeometryFile path: {geometry_file_path}")
+                logger.error("GeometryFile is not allowed to contain 'traj'")
+                logger.error(
+                    f"Extracted GeometryFile path: {geometry_file_path}"
+                )
+                quit(1)
+        else:
+            logger.info(
+                "AMS: GeometryFile was not set in AMS input file! "
+                + "- Will fail in the case InfInit is used"
+            )
         job = AMSJob.from_input(inp)
         settings = job.settings
+        if hasattr(settings.input.ams, "System"):
+            del settings.input.ams.System
         molecule = job.molecule[""]
         if self.update_box:
             self.molecule_lattice = molecule.lattice  # Check input settings
@@ -115,7 +144,7 @@ class AMSEngine(EngineBase):  # , metaclass=Singleton):
             "fs", self.time_unit
         )
         if timestep != ams_timestep:
-            logger.error("Mismatch between AMS and Pyretis timestep!")
+            logger.error("Mismatch between AMS and InfRETIS timestep!")
             quit(1)
 
         self.random_velocities_method = None
@@ -136,6 +165,15 @@ class AMSEngine(EngineBase):  # , metaclass=Singleton):
             keep_crashed_workerdir=True,
             always_keep_workerdir=True,
         )
+        if geometry_file_line is not None:
+            self.worker.CreateMDState(geometry_file_path, molecule)
+
+            state = self.worker.MolecularDynamics(
+                geometry_file_path, nsteps=0, setsteptozero=True
+            )  # Also writes frame into out_file
+            self._add_state(geometry_file_path, state[0])
+            # print('self.states', self.states)
+
         self._finalize = weakref.finalize(self, self.worker.stop)
 
     def step(self, system, name, set_trajfile=True, set_step_to_zero=False):
@@ -205,6 +243,8 @@ class AMSEngine(EngineBase):  # , metaclass=Singleton):
         # from the AMSWorker. Next state is always the last one.
         system.vpot = states[-1].get_potentialenergy(unit=self.ene_unit)
         system.ekin = states[-1].get_kineticenergy(unit=self.ene_unit)
+        system.etot = system.vpot + system.ekin
+        system.temp = states[-1].get_temperature()
 
         # Save state
         self._add_state(new_state, states[-1])
@@ -233,6 +273,12 @@ class AMSEngine(EngineBase):  # , metaclass=Singleton):
         """
         if idx == -1:
             idx = 0
+        if len(self.states.keys()) == 0:
+            logger.info(
+                "Infinit requirement for 0 paths: self.set_idx = True, idx = 0"
+            )
+            self.set_idx = True
+            self.n_init = 0
 
         state = self.states[filename][idx]
 
@@ -267,7 +313,10 @@ class AMSEngine(EngineBase):  # , metaclass=Singleton):
         4. Updates the list of old states to the current states.
         """
         self.exe_dir = md_items["exe_dir"]
-        self.ens_name = md_items["ens"]["ens_name"] + "_"
+        if "ens" in md_items.keys():
+            self.ens_name = md_items["ens"]["ens_name"] + "_"
+        else:
+            self.ens_name = "init"
         logger.info(
             f"self.exe_dir {self.exe_dir}"
             + f" md_items['exe_dir'] {md_items['exe_dir']}"
@@ -317,6 +366,69 @@ class AMSEngine(EngineBase):  # , metaclass=Singleton):
 
         self.worker.MolecularDynamics(outfile, nsteps=0, setsteptozero=True)
 
+    def _extract_frame_from_disk(self, traj_file, idx, out_file):
+        """Extract a frame from a trajectory file from disk.
+
+        Parameters
+        ----------
+        traj_file : string
+            The AMS file to open.
+        idx : integer
+            The frame number we look for.
+        out_file : string
+            The file to dump to.
+
+        Note
+        ----
+        This will only properly work if the frames in the input
+        trajectory are uniformly spaced in time.
+
+        """
+        logger.info(
+            "AMS extracting frame from disk: %s, %i -> %s",
+            traj_file,
+            idx,
+            out_file,
+        )
+        rkf = RKFTrajectoryFile(traj_file)
+        rkf.store_mddata()
+        molecule = rkf.get_plamsmol()
+        rkf.read_frame(idx, molecule=molecule)
+
+        if self.update_box:
+            molecule.lattice = self.molecule_lattice
+        if os.path.exists(
+            out_file
+        ):  # file must never be there before PrepareMD
+            self._removefile(out_file)
+        if out_file in self.states:
+            self._deletestate(out_file)
+
+        self.worker.PrepareMD(out_file)
+        try:
+            self.worker.CreateMDState(out_file, molecule)
+        except Exception as e:
+            if "MD state with given title already exists" in str(e):
+                print("MD state with given title already exists: ", out_file)
+                logger.error("AMS error in CreateMDState: %s", str(e))
+                self.worker.DeleteMDState(out_file)
+                self.worker.CreateMDState(out_file, molecule)
+            else:
+                raise e
+        if "Velocities" in rkf.mddata:
+            vel = rkf.mddata["Velocities"]
+            vel = np.reshape(
+                vel, (-1, 3)
+            )  # RKFTrajectoryFile returns 1D array
+            self.worker.SetVelocities(
+                out_file, vel, dist_unit="bohr", time_unit="fs"
+            )  # Units used in rkf file
+
+        state = self.worker.MolecularDynamics(
+            out_file, nsteps=0, setsteptozero=True
+        )  # Also writes frame into out_file
+        self._add_state(out_file, state[0])
+
     def _extract_frame(self, traj_file, idx, out_file):
         """Extract a frame from a trajectory file.
 
@@ -340,42 +452,63 @@ class AMSEngine(EngineBase):  # , metaclass=Singleton):
                 "AMS extracting frame: %s, %i -> %s", traj_file, idx, out_file
             )
             self._copystate(traj_file, out_file, idx=idx)
+            self.worker.PrepareMD(out_file)
             self.worker.MolecularDynamics(
                 out_file, nsteps=0, setsteptozero=True
             )  # Writes traj file
         else:
-            logger.info(
-                "AMS extracting frame from disk: %s, %i -> %s",
-                traj_file,
-                idx,
-                out_file,
-            )
-            rkf = RKFTrajectoryFile(traj_file)
-            rkf.store_mddata()
-            molecule = rkf.get_plamsmol()
-            rkf.read_frame(idx, molecule=molecule)
-            if self.update_box:
-                molecule.lattice = self.molecule_lattice
-            if os.path.exists(
-                out_file
-            ):  # file must never be there before PrepareMD
-                self._removefile(out_file)
-            if out_file in self.states:
-                self._deletestate(out_file)
-            self.worker.PrepareMD(out_file)
-            self.worker.CreateMDState(out_file, molecule)
-            if "Velocities" in rkf.mddata:
-                vel = rkf.mddata["Velocities"]
-                vel = np.reshape(
-                    vel, (-1, 3)
-                )  # RKFTrajectoryFile returns 1D array
-                self.worker.SetVelocities(
-                    out_file, vel, dist_unit="bohr", time_unit="fs"
-                )  # Units used in rkf file
-            state = self.worker.MolecularDynamics(
-                out_file, nsteps=0, setsteptozero=True
-            )  # Also writes frame into out_file
-            self._add_state(out_file, state[0])
+            try:
+                self._extract_frame_from_disk(traj_file, idx, out_file)
+            except Exception as e:
+                logger.error(
+                    f"Error extracting frame from {traj_file}, idx={idx}: {e}"
+                )
+                logger.info(
+                    f"Wait until file is written: {traj_file}, idx={idx}"
+                )
+                # wait until the file is ready
+                wait_seconds = 0
+                last_mtime = None
+
+                while wait_seconds < 1200:
+                    if os.path.exists(traj_file):
+                        current_mtime = os.path.getmtime(traj_file)
+                        if (
+                            last_mtime is not None
+                            and current_mtime != last_mtime
+                        ):
+                            # File has been updated
+                            break
+                        last_mtime = current_mtime
+                    else:
+                        last_mtime = None  # Reset if file disappeared
+
+                    time.sleep(0.1)
+                    wait_seconds += 0.1
+
+                if not os.path.exists(traj_file):
+                    logger.error(
+                        f"File {traj_file} did not appear within 1200 seconds."
+                    )
+                    raise RuntimeError(
+                        f"Failed to extract frame for {traj_file}, "
+                        + f"idx={idx}, after waiting for file availability"
+                    ) from e
+                elif wait_seconds >= 1200:
+                    logger.warning(
+                        f"File {traj_file} exists but still changed in "
+                        + "1200 seconds."
+                    )
+                    raise RuntimeError(
+                        f"Failed to extract frame for {traj_file}, "
+                        + f"idx={idx}, after waiting for file availability"
+                    ) from e
+                else:
+                    logger.info(
+                        "File is available and updated after "
+                        + f"{wait_seconds:.1f} seconds: {traj_file}"
+                    )
+                    self._extract_frame_from_disk(traj_file, idx, out_file)
 
     def _propagate_from(
         self,
@@ -398,7 +531,7 @@ class AMSEngine(EngineBase):  # , metaclass=Singleton):
         ----------
         name : string
             A name to use for the trajectory we are generating.
-        path : object like :py:class:`pyretis.core.path.PathBase`
+        path : object like :py:class:`infretis.core.path.PathBase`
             This is the path we use to fill in phase-space points.
         ensemble: dict
             It contains:
@@ -440,6 +573,8 @@ class AMSEngine(EngineBase):  # , metaclass=Singleton):
 
         kin_enes = []
         pot_enes = []
+        tot_enes = []
+        temps = []
         traj_file = os.path.join(self.exe_dir, name + "." + self.ext)
         # First, process input snapshot
         initial = system.config[0]
@@ -487,8 +622,10 @@ class AMSEngine(EngineBase):  # , metaclass=Singleton):
                     unit=self.ene_unit
                 )
             )
+            tot_enes.append(kin_enes[-1] + pot_enes[-1])
+            temps.append(self.states[traj_file][i].get_temperate())
 
-            logger.info("OP: %f", order[0])
+            logger.info("OP: %f in frame %s %i", order[0], traj_file, i)
 
             msg_file.flush()
             if stop:
@@ -509,7 +646,7 @@ class AMSEngine(EngineBase):  # , metaclass=Singleton):
                 set_step_to_zero=set_step_to_zero,
             )
         logger.info("AMS propagation done, obtaining energies")
-        path.update_energies(kin_enes, pot_enes)
+        path.update_energies(kin_enes, pot_enes, tot_enes, temps)
         msg_file.write("# Propagation done.")
         msg_file.flush()
         return success, status
@@ -589,13 +726,13 @@ class AMSEngine(EngineBase):  # , metaclass=Singleton):
             )
 
             # Can be removed, but nice way to check velocity generation
-            # logger.info(
-            #     "AMS Epot: %f Ekin: %f",
-            #     state.get_potentialenergy(unit=self.ene_unit),
-            #     state.get_kineticenergy(unit=self.ene_unit),
-            # )
-            # # Write rkf file
-            # logger.info("AMS setting output file: %s", genvel)
+            logger.info(
+                "AMS Epot: %f Ekin: %f",
+                state.get_potentialenergy(unit=self.ene_unit),
+                state.get_kineticenergy(unit=self.ene_unit),
+            )
+            # Write rkf file
+            logger.info("AMS setting output file: %s", genvel)
             if os.path.exists(
                 genvel
             ):  # File must never be there before PrepareMD
@@ -609,6 +746,8 @@ class AMSEngine(EngineBase):  # , metaclass=Singleton):
             system.vel_rev = False
             system.ekin = kin_new
             system.vpot = state.get_potentialenergy(unit=self.ene_unit)
+            system.etot = system.ekin + system.vpot
+            system.temp = state.get_temperature()
             self._add_state(genvel, state, rewrite=True)
         else:  # Soft velocity change, from a Gaussian distribution:
             msgtxt = "AMS engine only support aimless shooting!"
@@ -657,19 +796,19 @@ class AMSEngine(EngineBase):  # , metaclass=Singleton):
     def _copystate(self, source, dest, idx=-1):
         if source == dest:
             print(
-                "-----------------------------------------------------------------------------"
+                "------------------------------------------------------------"
             )
             print("WARNING: source == dest in ams._copystate")
             print("This should only happen in pytest")
             print(
-                "-----------------------------------------------------------------------------"
+                "------------------------------------------------------------"
             )
             pass
         else:
             if dest in self.states:
+                logger.info("AMS snap exists delete: %s", dest)
                 self._deletestate(dest)
-
-            if idx == -1:
+            if "traj" not in os.path.basename(source):
                 logger.info("AMS Copying snap to snap: %s -> %s", source, dest)
                 self.states[dest] = [copy.deepcopy(self.states[source][0])]
                 self.worker.CopyMDState(source, dest)
@@ -709,7 +848,15 @@ class AMSEngine(EngineBase):  # , metaclass=Singleton):
                 self.worker.DeleteMDState(filename + "_" + str(i))
         else:
             logger.info("AMS Deleting snap: %s", filename)
-            self.worker.DeleteMDState(filename)
+            try:
+                self.worker.DeleteMDState(filename)
+            except Exception as e:
+                if "MD state with given title not found" in str(e):
+                    print("MD state with given title not found: ", filename)
+                    logger.info("AMS error in DeleteMDState: %s", str(e))
+                else:
+                    print("else: tried but failed but wrong")
+                    raise e
 
         del self.states[filename]
 

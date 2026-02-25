@@ -48,6 +48,7 @@ class EngineBase(metaclass=ABCMeta):
         self.ext: str = "xyz"
         self.input_files: Dict[str, Union[str, Path]] = {}
         self.order_function: Optional[OrderParameter] = None
+        self.steps = 0
 
     @property
     def beta(self):
@@ -360,6 +361,8 @@ class EngineBase(metaclass=ABCMeta):
         success, status = self._propagate_from(
             name, path, system, ens_set, msg_file, reverse=reverse
         )
+        self.steps += path.length
+
         # Reset to initial state:
         # ensemble['system'] = initial_state
         msg_file.close()
@@ -402,10 +405,10 @@ class EngineBase(metaclass=ABCMeta):
     def snapshot_to_system(system: System, snapshot: Dict[str, Any]) -> System:
         """Convert a snapshot to a system object."""
         system_copy = system.copy()
-        system_copy.order = snapshot.get("order", None)
+        system_copy.order = snapshot.get("order", [-float("nan")])
         # # particles = system_copy.particles
-        system_copy.pos = snapshot.get("pos", None)
-        system_copy.vel = snapshot.get("vel", None)
+        system_copy.pos = snapshot.get("pos", np.zeros(0))
+        system_copy.vel = snapshot.get("vel", np.zeros(0))
         system_copy.vpot = snapshot.get("vpot", None)
         system_copy.ekin = snapshot.get("ekin", None)
         for external in ("config", "vel_rev"):

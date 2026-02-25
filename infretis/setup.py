@@ -7,12 +7,13 @@ from typing import Optional, Tuple
 import tomli
 
 from infretis.asyncrunner import aiorunner, future_list
+from infretis.classes.engines.factory import create_engines
 from infretis.classes.formatter import get_log_formatter
 from infretis.classes.path import load_paths_from_disk
 from infretis.classes.repex import REPEX_state
 from infretis.classes.repex_pp import REPEX_state_pp
 from infretis.classes.repex_staple import REPEX_state_staple
-from infretis.core.tis import def_globals, run_md
+from infretis.core.tis import run_md
 
 logger = logging.getLogger("main")
 logger.setLevel(logging.DEBUG)
@@ -62,14 +63,9 @@ def setup_internal(config: dict) -> Tuple[dict, REPEX_state | REPEX_state_pp | R
         "cap": state.cap,
     }
 
-    # setup global engines, the engine_occupation lists,
-    # and create orderparameters.
-    engine_occ = def_globals(config)
+    # setup the engine_occupation list
+    _, engine_occ = create_engines(config)
     state.engine_occ = engine_occ
-
-    # write pattern header
-    if state.pattern:
-        state.pattern_header()
 
     return md_items, state
 
@@ -115,20 +111,10 @@ def setup_config(
         logger.info("%s file not found, exit.", inp)
         return None
 
-    # check if restart.toml exist:
+    # check if restart.toml exist
     if inp != re_inp and os.path.isfile(re_inp):
-        # load restart input:
-        with open(re_inp, mode="rb") as read:
-            re_config = tomli.load(read)
-
-        # check if sim settings for the two are equal:
-        equal = True
-        for key in config.keys():
-            if config[key] != re_config.get(key, {}):
-                equal = False
-                logger.info("We use {re_inp} instead.")
-                break
-        config = re_config if equal else config
+        msg = f"Restart file '{re_inp}' found, but its not the run file!"
+        raise ValueError(msg)
 
     # in case we restart, toml file has a 'current' subdict.
     if "current" in config:
@@ -157,14 +143,12 @@ def setup_config(
             "locked": [],
             "size": size,
             "frac": {},
+            "wsubcycles": [0 for _ in range(config["runner"]["workers"])],
+            "tsubcycles": 0,
         }
 
         # write/overwrite infretis_data.txt
         write_header(config)
-
-        # set pattern
-        if config["output"].get("pattern", False):
-            config["output"]["pattern_file"] = os.path.join("pattern.txt")
 
     # quantis or any other method requiring different engines in each ensemble
     has_ens_engs = config["simulation"].get("ensemble_engines", False)
@@ -174,9 +158,24 @@ def setup_config(
             ens_engs.append(["engine"])
         config["simulation"]["ensemble_engines"] = ens_engs
 
-    # set the keywords once
+    # set all keywords only once, so they appear in restart.toml
+    # and we can avoid the .get() in other parts
     if "seed" not in config["simulation"].keys():
         config["simulation"]["seed"] = 0
+
+    # [output]
+    keep_maxop_trajs = config["output"].get("keep_maxop_trajs", False)
+    config["output"]["keep_maxop_trajs"] = keep_maxop_trajs
+    delete_old = config["output"].get("delete_old", False)
+    delete_old_all = config["output"].get("delete_old_all", False)
+    if not delete_old and keep_maxop_trajs:
+        raise TOMLConfigError("keep_maxop_trajs=True requires delete_old=True")
+    if delete_old_all and keep_maxop_trajs:
+        msg = (
+            "delete_old_all=True will delete all trajectories. Set "
+            "keep_maxop_trajs to False in the [output] section"
+        )
+        raise TOMLConfigError(msg)
 
     quantis = config["simulation"]["tis_set"].get("quantis", False)
     config["simulation"]["tis_set"]["quantis"] = quantis
@@ -209,7 +208,6 @@ def check_config(config: dict) -> None:
     sh_moves = config["simulation"]["shooting_moves"]
     n_sh_moves = len(sh_moves)
     intf_cap = config["simulation"]["tis_set"].get("interface_cap", False)
-    quantis = config["simulation"]["tis_set"].get("quantis", False)
     lambda_minus_one = config["simulation"]["tis_set"].get(
         "lambda_minus_one", False
     )
@@ -218,9 +216,6 @@ def check_config(config: dict) -> None:
         raise TOMLConfigError(
             "lambda_minus_one interface must be less than the first interface!"
         )
-
-    if quantis and lambda_minus_one:
-        raise TOMLConfigError("Cannot run quantis with lambda_minus_one!")
 
     if n_ens < 2:
         raise TOMLConfigError("Define at least 2 interfaces!")
@@ -274,6 +269,18 @@ def check_config(config: dict) -> None:
                         + " settings of one of the engines in"
                         + " 'infretis.mdp'!"
                     )
+
+    # check wsubcycles and tsubcycles in case restarting from old version
+    if "wsubcycles" not in config["current"]:
+        list_of_zeros = [0 for _ in range(config["runner"]["workers"])]
+        config["current"]["wsubcycles"] = list_of_zeros
+    if "tsubcycles" not in config["current"]:
+        config["current"]["tsubcycles"] = 0
+    # if increased number of workers
+    wsub_num = len(config["current"]["wsubcycles"])
+    if wsub_num < config["runner"]["workers"]:
+        extra = config["runner"]["workers"] - wsub_num
+        config["current"]["wsubcycles"] += [0] * extra
 
 
 def write_header(config: dict) -> None:
