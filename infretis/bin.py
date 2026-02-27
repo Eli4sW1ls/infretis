@@ -49,7 +49,7 @@ def internalrun(input_file, enable_profiling=True):
     if enable_profiling:
         print("📊 Basic profiling requested - use profiling.py module for detailed analysis")
         # start background reporting every five minutes
-        start_periodic_reports(interval=300.0)
+        start_periodic_reports(interval=150.0)
     
     print("🚀 About to call setup_config - set breakpoint here!")
     try:
