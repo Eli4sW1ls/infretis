@@ -888,10 +888,8 @@ class PathStorage(OutputBase):
         Returns:
             A copy of the input path.
         """
-        path_copy = path.copy()
-        new_pos, source = _generate_file_names(
-            path_copy, target_dir, prefix=prefix
-        )
+        # Build source→dest mapping from the original path (configs unchanged).
+        new_pos, source = _generate_file_names(path, target_dir, prefix=prefix)
         # keep any files where extension match the patterns in keep_traj_fnames
         if keep_traj_fnames:
             for source_file in source.copy().keys():
@@ -902,20 +900,27 @@ class PathStorage(OutputBase):
                     fpath = os.path.join(source_dir, new_fname)
                     if os.path.isfile(fpath):
                         source[fpath] = os.path.join(target_dir, new_fname)
-        # Update positions:
-        for pos, phasepoint in zip(new_pos, path_copy.phasepoints):
-            phasepoint.config = (pos[0], pos[1])
-            # phasepoint.particles.set_pos(pos)
+        # Link/copy trajectory files to the archive directory.
+        # os.link creates a hard link (instant, no data copy) when src and
+        # dest are on the same filesystem; shutil.copy is the cross-device
+        # fallback.  Both are safe: os.remove on a hard link only decrements
+        # the link count, leaving the source inode intact.
         for src, dest in source.items():
             if src != dest:
                 if os.path.exists(dest):
                     if os.path.isfile(dest):
                         logger.debug("Removing %s as it exists", dest)
                         os.remove(dest)
-                logger.debug("Copy %s -> %s", src, dest)
-                # DZ: has to be copy here.
-                # shutil.move(src, dest)
-                shutil.copy(src, dest)
+                logger.debug("Link/copy %s -> %s", src, dest)
+                try:
+                    os.link(src, dest)
+                except OSError:
+                    # Cross-device link or unsupported filesystem — fall back.
+                    shutil.copy(src, dest)
+        # Create a copy of the path with configs updated to the new locations.
+        path_copy = path.copy()
+        for pos, phasepoint in zip(new_pos, path_copy.phasepoints):
+            phasepoint.config = (pos[0], pos[1])
         return path_copy
 
     def output(self, step: int, data: Any) -> InfPath:
