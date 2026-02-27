@@ -41,6 +41,10 @@ class REPEX_state_staple(REPEX_state):
         """Initiate REPEX given confic dict from *toml file."""
         super().__init__(config, minus=True)
         
+        # Record simulation start time (was a class-level variable in the old
+        # base REPEX_state; kept here so pattern_header() can reference it).
+        self.start_time = time.time()
+
         # Enable visual validation by default (can be disabled in config)
         self.visual_validation = config.get("output", {}).get("visual_validation", False)
         
@@ -1182,14 +1186,15 @@ class REPEX_state_staple(REPEX_state):
 
     def pattern_header(self):
         """Write pattern0 header."""
-        if self.toinitiate == 0:
+        pattern_file = self.config["output"].get("pattern_file")
+        if self.toinitiate == 0 and pattern_file:
             restarted = self.config["current"].get("restarted_from")
             writemode = "a" if restarted else "w"
-            with open(self.pattern_file, writemode) as fp:
+            with open(pattern_file, writemode) as fp:
                 fp.write(
-                    "# Worker\tMD_start [s]\t\twMD_start [s]\twMD_end",
-                    +"[s]\tMD_end [s]\t Dask_end [s]",
-                    +f"\tEnsembles\t{self.start_time}\n",
+                    "# Worker\tMD_start [s]\t\twMD_start [s]\twMD_end"
+                    "[s]\tMD_end [s]\t Dask_end [s]"
+                    f"\tEnsembles\t{self.start_time}\n"
                 )
 
     def load_paths(self, paths):

@@ -8,8 +8,6 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 from numpy.typing import ArrayLike
-from itertools import zip_longest
-
 from infretis.tools.performance_profiler import global_profiler
 
 
@@ -661,49 +659,51 @@ class StaplePath(Path):
         self,
         ekin: Union[np.ndarray, List[float]],
         vpot: Union[np.ndarray, List[float]],
+        etot: Union[np.ndarray, List[float]],
+        temp: Union[np.ndarray, List[float]],
     ) -> None:
         """Update the energies for the phase points.
 
-        This method is useful in cases where the energies are
-        read from external engines and returned as a list of
-        floats.
+        Matches the updated base-class Path.update_energies signature.
+        StaplePath-specific: when energies are one shorter than phasepoints
+        (the first point is a turn segment anchor), a one-frame offset is applied
+        for ekin/vpot while etot/temp are applied normally.
 
         Args:
             ekin : The kinetic energies to set.
             vpot : The potential energies to set.
+            etot : The total energies to set.
+            temp : The temperature to set.
         """
+        # Detect the StaplePath-specific off-by-one case for ekin/vpot.
         start = 0
-        if len(ekin) != len(vpot):
+        if len(ekin) == len(self.phasepoints) - 1:
             logger.debug(
-                "Kinetic and potential energies have different length."
-            )
-        if len(ekin) != len(self.phasepoints):
-            logger.debug(
-                "Length of kinetic energy and phase points differ %d != %d.",
+                "ekin/vpot length %d is one less than phasepoints %d. "
+                "Assuming first phase point is a turn-segment anchor; skipping it.",
                 len(ekin),
                 len(self.phasepoints),
             )
-        if len(vpot) != len(self.phasepoints):
-            logger.debug(
-                "Length of potential energy and phase points differ %d != %d.",
-                len(vpot),
-                len(self.phasepoints),
-            )
-        if len(ekin) == len(vpot) == len(self.phasepoints) - 1:
-            logger.debug(
-                "Kinetic and potential energies have length %d, but phase points have length %d. "
-                "Assuming last phase point is the first point of a turn segment.",
-                len(ekin),
-                len(self.phasepoints),
-            )
-            start = 1  # Skip first phase point if energies are one less than phasepoints
-        for phasepoint, (ekini, vpoti) in zip(self.phasepoints[start:], zip_longest(ekin, vpot, fillvalue=None)):
-            if vpoti is None:
-                logger.warning("Ran out of potential energies, setting to None.")
-            if ekini is None:
-                logger.warning("Ran out of kinetic energies, setting to None.")
-            phasepoint.vpot = vpoti
-            phasepoint.ekin = ekini
+            start = 1
+
+        energies = [ekin, vpot, etot, temp]
+        names = ["ekin", "vpot", "etot", "temp"]
+        len_p = len(self.phasepoints)
+
+        for ene, name in zip(energies, names):
+            offset = start if name in ("ekin", "vpot") else 0
+            len_e = len(ene)
+            if len_e != len_p - offset:
+                logger.debug(
+                    f"Length of {name} and phasepoints differ {len_e}!={len_p - offset}"
+                )
+            for i, phasepoint in enumerate(self.phasepoints[offset:]):
+                try:
+                    enei = ene[i]
+                except IndexError:
+                    logger.warning(f"Ran out of {name}, setting to None.")
+                    enei = None
+                setattr(phasepoint, name, enei)
 
     @profiled
     def copy(self) -> Path:
