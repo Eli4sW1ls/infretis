@@ -863,9 +863,12 @@ class PathStorage(OutputBase):
                 self.out_dir_fmt.format(step), val["file"]
             )
             files.append((full_path, relative_path))
+            # Build the full content in memory and write in a single call.
+            # On network filesystems each write() is expensive; batching
+            # reduces N_frames syscalls per file to 1.
+            content = "\n".join(str(line) for line in fmt.format(step, (path, status))) + "\n"
             with open(full_path, mode="w", encoding="utf8") as output:
-                for line in fmt.format(step, (path, status)):
-                    output.write(f"{line}\n")
+                output.write(content)
         return files
 
     @staticmethod
@@ -948,10 +951,11 @@ class PathStorage(OutputBase):
         # To organize things we create a subfolder for storing the
         # files. This is on form: /path/to/000/traj/11/traj
         traj_dir = os.path.join(archive_path, "accepted")
-        # Create the needed directories:
-        make_dirs(traj_dir)
-        # Write order, energy and traj files to the archive:
         from infretis.tools.performance_profiler import global_profiler
+        # Create the needed directories:
+        with global_profiler.profile_operation("pstore:makedirs"):
+            make_dirs(traj_dir)
+        # Write order, energy and traj files to the archive:
         with global_profiler.profile_operation("pstore:output_path_files"):
             _ = self.output_path_files(step, [path, "ACC"], archive_path)
         with global_profiler.profile_operation("pstore:move_path"):
