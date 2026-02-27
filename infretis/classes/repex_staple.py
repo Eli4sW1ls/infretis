@@ -1277,7 +1277,12 @@ class REPEX_state_staple(REPEX_state):
                             "min_op": self.traj_data[pn_old]["min_op"],
                         }
                 pn_news.append(out_traj.path_number)
-                self.add_traj(ens_num, out_traj, valid=out_traj.weights)
+                if self.staple_infinite_swap:
+                    # Defer self.prob: batch all state updates and compute
+                    # the P matrix once after the loop (see below).
+                    self._update_state_no_prob(ens_num, out_traj, out_traj.weights)
+                else:
+                    self.add_traj(ens_num, out_traj, valid=out_traj.weights)
 
         # record weights
         locked_trajs = self.locked_paths()

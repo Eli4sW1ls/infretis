@@ -319,8 +319,13 @@ class REPEX_state:
 
         return md_items
 
-    def add_traj(self, ens, traj, valid, count=True, n=0):
-        """Add traj to state and calculate P matrix."""
+    def _update_state_no_prob(self, ens, traj, valid):
+        """Apply offset/validation and update state WITHOUT recomputing prob.
+
+        Used by :meth:`add_traj` and by callers (e.g. the ensemble loop in
+        ``treat_output``) that want to batch multiple state updates before
+        triggering a single expensive ``self.prob`` recomputation.
+        """
         if ens >= 0 and self._offset != 0:
             valid = tuple([0 for _ in range(self._offset)] + list(valid))
         elif ens < 0:
@@ -330,8 +335,6 @@ class REPEX_state:
         ens += self._offset
 
         if valid[ens] == 0:
-            # The path is not valid in ensemble.
-            # This situation should only occur in the initial path loading.
             raise_msg = (
                 f"Path {traj.path_number} lying in {traj.adress} "
                 f"is not valid in ensemble {ens:03.0f}!\n"
@@ -345,12 +348,14 @@ class REPEX_state:
                 )
             raise ValueError(raise_msg)
 
-        # invalidate last prob
         self._last_prob = None
         self._trajs[ens] = traj
         self.state[ens, :] = valid
         self.unlock(ens)
 
+    def add_traj(self, ens, traj, valid, count=True, n=0):
+        """Add traj to state and calculate P matrix."""
+        self._update_state_no_prob(ens, traj, valid)
         # Calculate P matrix
         self.prob
 
