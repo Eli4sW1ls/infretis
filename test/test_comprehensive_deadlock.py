@@ -142,10 +142,10 @@ def test_cases():
         {
             "name": "Multiple problems",
             "state": np.array([
-                [0.0, 0.5, 0.0, 0.0, 0.0],
+                [0.0, 0.5, 1.0, 0.5, 0.0],
                 [0.5, 0.0, 0.0, 0.0, 0.0],
                 [0.0, 0.0, 1.0, 0.0, 0.0],
-                [0.0, 0.5, 0.0, 0.0, 0.5],
+                [0.0, 0.5, 0.5, 0.0, 0.0],
                 [0.0, 0.0, 0.0, 0.0, 0.0]
             ])
         },
@@ -202,7 +202,7 @@ def test_cases():
     print(f"SUMMARY: {passed} passed, {failed} failed out of {len(test_scenarios)} tests")
     print(f"{'='*80}")
     
-    return failed == 0
+    assert failed == 0
 
 if __name__ == "__main__":
     success = test_cases()
