@@ -202,21 +202,44 @@ class REPEX_state_staple(REPEX_state):
             if n_block == 0:
                 continue
 
-            # Determine algorithm once; reuse inside the profiled block
+            # Determine algorithm once; reuse inside the profiled block.
+            # Algorithm selection:
+            #   trivial   — 1×1 block
+            #   quick     — all non-zero rows equal (greedy sweep is exact)
+            #   contiguous— STAPLE-structured rows with bandwidth ≤ 10;
+            #               uses forward-backward bitmask DP in O(n × 2^w)
+            #               where w = max row bandwidth — thousands of times
+            #               faster than Glynn for large n.
+            #   glynn     — unstructured blocks ≤ 12 (Glynn exact permanent)
+            #   random    — everything else (Monte Carlo, 10k steps)
             if n_block == 1:
                 algo = "trivial"
             elif np.all(np.isclose(sub_matrix, sub_matrix[0, :]) | (sub_matrix == 0)):
                 algo = "quick"
-            elif self._is_staple_structured(
-                np.where(sub_matrix != 0, 1, 0)
-            ):
-                algo = "contiguous"
-            elif n_block <= 12:
-                algo = "glynn"
             else:
-                algo = "random"
+                # Measure max row bandwidth and check contiguity in one pass
+                _bw = 0
+                _contiguous = True
+                for _row in sub_matrix:
+                    _nz = np.flatnonzero(_row)
+                    if len(_nz) == 0:
+                        continue
+                    _span = int(_nz[-1]) - int(_nz[0]) + 1
+                    if _span != len(_nz):  # gap → not contiguous
+                        _contiguous = False
+                        break
+                    if _span > _bw:
+                        _bw = _span
+                if _contiguous and _bw <= 10:
+                    algo = "contiguous"
+                elif n_block <= 12:
+                    algo = "glynn"
+                else:
+                    algo = "random"
 
-            with global_profiler.profile_operation("inf_retis:block", additional_data={"size": n_block, "algo": algo}):
+            # Use algo-specific operation name so the profiler report shows
+            # per-algorithm breakdowns (e.g. "inf_retis:block:quick").
+            with global_profiler.profile_operation(f"inf_retis:block:{algo}", additional_data={"size": n_block}):
                 if algo == "trivial":
                     prob_matrix = np.array([[1.0]])
                 elif algo == "quick":
@@ -360,44 +383,102 @@ class REPEX_state_staple(REPEX_state):
         return True
     
     def _contiguous_permanent_prob(self, arr):
-        """Optimized permanent calculation for STAPLE's contiguous row structure."""
-        n = arr.shape[0]
-        out = np.zeros(shape=arr.shape, dtype="longdouble")
-        
-        # Scale the array to avoid numerical instabilities
-        scaled_arr = arr.copy()
-        if n > 0:
-            row_max = np.max(scaled_arr, axis=1, keepdims=True)
-            row_max[row_max == 0] = 1.0
-            scaled_arr = scaled_arr / row_max
+        """P matrix via forward-backward bitmask DP for contiguous-row matrices.
 
-        # For each matrix element (i,j)
+        For a matrix where every row's non-zeros form a contiguous span of width
+        at most w, this runs in O(n × 2^w) — thousands of times faster than
+        Glynn's O(n × 2^n) for large n with small bandwidth (typical STAPLE
+        staircase matrices have w ~ 3-4).
+
+        Algorithm:
+          fwd[i][S] = Σ_{σ: rows 0..i-1 → cols S} Π a[k,σ(k)]
+          bwd[i][S] = Σ_{σ: rows i..n-1 → cols S} Π a[k,σ(k)]
+          P[i,j]    = a[i,j] × Σ_{Sf ∈ fwd[i], j∉Sf} fwd[i][Sf] · bwd[i+1][full∖Sf∖{j}]
+        """
+        n = arr.shape[0]
+        out = np.zeros((n, n), dtype=np.longdouble)
+        if n == 0:
+            return out
+
+        # Scale to avoid numerical instability
+        scaled = arr.astype(np.longdouble).copy()
+        row_max = np.max(scaled, axis=1, keepdims=True)
+        row_max[row_max == 0] = 1.0
+        scaled /= row_max
+
+        # Non-zero column ranges [l[i], r[i]] for each row
+        l = np.empty(n, dtype=np.intp)
+        r = np.empty(n, dtype=np.intp)
         for i in range(n):
-            for j in range(n):
-                if scaled_arr[i][j] == 0:
+            nz = np.flatnonzero(scaled[i])
+            if len(nz) == 0:
+                return out  # zero row → permanent is 0
+            l[i] = int(nz[0])
+            r[i] = int(nz[-1])
+
+        # Forward DP
+        fwd = [dict() for _ in range(n + 1)]
+        fwd[0][0] = np.longdouble(1.0)
+        for i in range(n):
+            cur, nxt = fwd[i], fwd[i + 1]
+            for S, val in cur.items():
+                for j in range(l[i], r[i] + 1):
+                    v = scaled[i, j]
+                    if v == 0:
+                        continue
+                    bit_j = 1 << j
+                    if S & bit_j:
+                        continue
+                    key = S | bit_j
+                    if key in nxt:
+                        nxt[key] += val * v
+                    else:
+                        nxt[key] = val * v
+
+        # Backward DP
+        bwd = [dict() for _ in range(n + 1)]
+        bwd[n][0] = np.longdouble(1.0)
+        for i in range(n - 1, -1, -1):
+            cur, prv = bwd[i + 1], bwd[i]
+            for S, val in cur.items():
+                for j in range(l[i], r[i] + 1):
+                    v = scaled[i, j]
+                    if v == 0:
+                        continue
+                    bit_j = 1 << j
+                    if S & bit_j:
+                        continue
+                    key = S | bit_j
+                    if key in prv:
+                        prv[key] += val * v
+                    else:
+                        prv[key] = val * v
+
+        full_mask = (1 << n) - 1
+
+        # Assemble P[i,j] from forward and backward contributions
+        for i in range(n):
+            fwd_i = fwd[i]
+            bwd_ip1 = bwd[i + 1]
+            for j in range(l[i], r[i] + 1):
+                v_ij = scaled[i, j]
+                if v_ij == 0:
                     continue
-                
-                # Create submatrix by removing row i and column j
-                rows = [r for r in range(n) if r != i]
-                columns = [c for c in range(n) if c != j]
-                submatrix = scaled_arr[np.ix_(rows, columns)]
-                
-                # Calculate permanent of submatrix using optimized method for STAPLE structure
-                if submatrix.size == 0:
-                    perm = 1.0
-                elif submatrix.shape[0] == 1:
-                    perm = submatrix[0, 0] if submatrix.shape[1] == 1 else np.sum(submatrix[0])
-                else:
-                    # Use contiguous structure to optimize permanent calculation
-                    perm = self._fast_contiguous_permanent(submatrix)
-                
-                out[i][j] = perm * scaled_arr[i][j]
-        
-        # Normalize using the same method as base implementation
+                bit_j = 1 << j
+                contrib = np.longdouble(0.0)
+                for S_f, v_f in fwd_i.items():
+                    if S_f & bit_j:
+                        continue
+                    v_b = bwd_ip1.get(full_mask ^ S_f ^ bit_j)
+                    if v_b:
+                        contrib += v_f * v_b
+                out[i, j] = v_ij * contrib
+
+        # Normalize
         row_sums = np.sum(out, axis=1)
-        max_row_sum = max(row_sums) if len(row_sums) > 0 else 1.0
-        if max_row_sum > 0:
-            return out / max_row_sum
+        max_rs = float(np.max(row_sums)) if np.any(row_sums > 0) else 1.0
+        if max_rs > 0:
+            out /= max_rs
         return out
     
     def _fast_contiguous_permanent(self, matrix):

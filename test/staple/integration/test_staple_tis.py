@@ -254,13 +254,13 @@ class TestStapleUtilities:
     """Test utility functions related to staple paths."""
     
     def test_get_ptype_import(self):
-        """Test that get_ptype function can be imported."""
+        """Test that get_pptype function can be imported."""
         try:
-            from infretis.classes.repex_staple import get_ptype
-            assert callable(get_ptype)
+            from infretis.classes.staple_path import StaplePath
+            assert callable(StaplePath.get_pptype)
         except ImportError:
             # Function might be defined elsewhere or not yet implemented
-            pytest.skip("get_ptype function not found")
+            pytest.skip("get_pptype function not found")
     
     def test_path_type_classification(self):
         """Test path type classification for staple paths."""
