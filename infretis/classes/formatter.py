@@ -951,7 +951,7 @@ class PathStorage(OutputBase):
         # Create the needed directories:
         make_dirs(traj_dir)
         # Write order, energy and traj files to the archive:
-        from infretis.profiling import global_profiler
+        from infretis.tools.performance_profiler import global_profiler
         with global_profiler.profile_operation("pstore:output_path_files"):
             _ = self.output_path_files(step, [path, "ACC"], archive_path)
         with global_profiler.profile_operation("pstore:move_path"):
