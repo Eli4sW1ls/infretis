@@ -1066,80 +1066,91 @@ class REPEX_state_staple(REPEX_state):
                         "ens_save_idx": ens_save_idx,
                         "ptype": str((chk_intf[0] if chk_intf[0] is not None else "") + chk_intf[2] + (chk_intf[1] if chk_intf[1] is not None else "")),
                     }
-                else:
-                    with global_profiler.profile_operation("treat_output:turns_and_regions"):
-                        if ens_save_idx is None:
-                            ens_save_idx = self.traj_data.get(pn_old, {}).get("ens_save_idx", ens_num)
-                        st, end, valid = out_traj.check_turns(self.interfaces)
+                    else:
+                        with global_profiler.profile_operation("treat_output:turns_and_regions"):
+                            if ens_save_idx is None:
+                                ens_save_idx = self.traj_data.get(pn_old, {}).get("ens_save_idx", ens_num)
+                            st, end, valid = out_traj.check_turns(self.interfaces)
 
-                        s_offset, e_offset = 0, 0
-                        if not valid:
-                            logger.warning(
-                                "Path does not have valid turns, cannot load staple path."
-                            )
-                            raise ValueError(f"Path does not have valid turns. {st}, {end}, {out_traj.get_orders_array()}")
-                        if (out_traj.pptype is None or len(out_traj.pptype[1]) < 3):
-                            raise ValueError(f"Path does not have valid pptype, cannot load staple path. pptype: {out_traj.pptype}")
-                            pptype = out_traj.get_pptype(self.interfaces, self.ensembles[ens_num + 1]['interfaces'])
-                        else:
-                            assert out_traj.pptype[0] == ens_num, f"Ensemble number mismatch: expected {ens_num}, got {out_traj.pptype[0]}"
-                            pptype = out_traj.pptype[1]
-                        if ens_num not in out_traj.sh_region.keys() or len(out_traj.sh_region[ens_num]) != 2:
-                            sh_region = out_traj.get_sh_region(self.interfaces, self.ensembles[ens_num + 1]['interfaces'])
-                            out_traj.sh_region[ens_num] = sh_region
-                        else:
-                            sh_region = out_traj.sh_region[ens_num]
-                    if st[1] == end[1]:
-                        if ens_num in [0, 1]: 
-                            if ens_num == 0:
-                                if pptype == "LMR":
+                            s_offset, e_offset = 0, 0
+                            if not valid:
+                                logger.warning(
+                                    "Path does not have valid turns, cannot load staple path."
+                                )
+                                raise ValueError(f"Path does not have valid turns. {st}, {end}, {out_traj.get_orders_array()}")
+                            if (out_traj.pptype is None or len(out_traj.pptype[1]) < 3):
+                                raise ValueError(f"Path does not have valid pptype, cannot load staple path. pptype: {out_traj.pptype}")
+                                pptype = out_traj.get_pptype(self.interfaces, self.ensembles[ens_num + 1]['interfaces'])
+                            else:
+                                assert out_traj.pptype[0] == ens_num, f"Ensemble number mismatch: expected {ens_num}, got {out_traj.pptype[0]}"
+                                pptype = out_traj.pptype[1]
+                            if ens_num not in out_traj.sh_region.keys() or len(out_traj.sh_region[ens_num]) != 2:
+                                sh_region = out_traj.get_sh_region(self.interfaces, self.ensembles[ens_num + 1]['interfaces'])
+                                out_traj.sh_region[ens_num] = sh_region
+                            else:
+                                sh_region = out_traj.sh_region[ens_num]
+                        if st[1] == end[1]:
+                            if ens_num in [0, 1]: 
+                                if ens_num == 0:
+                                    if pptype == "LMR":
+                                        e_offset = 1
+                                    elif pptype == "RML":
+                                        s_offset = 1 
+                                elif ens_num == 1:
+                                    if pptype != "LML":
+                                        raise ValueError(
+                                            f"Ensemble {ens_num} has invalid pptype {pptype}."
+                                        )
+                                    # Force start->end to be 0 -> 1 for ensemble 2 (no randomness)
+                                    # e_offset = np.random.choice([0, 1])
+                                    # s_offset = 1 - e_offset
+                                    s_offset = 0
                                     e_offset = 1
-                                elif pptype == "RML":
-                                    s_offset = 1 
-                            elif ens_num == 1:
-                                if pptype != "LML":
+                            elif ens_num == len(self.ensembles) - 2:
+                                if pptype != "RMR":
                                     raise ValueError(
                                         f"Ensemble {ens_num} has invalid pptype {pptype}."
                                     )
-                                # Force start->end to be 0 -> 1 for ensemble 2 (no randomness)
-                                # e_offset = np.random.choice([0, 1])
-                                # s_offset = 1 - e_offset
-                                s_offset = 0
-                                e_offset = 1
-                        elif ens_num == len(self.ensembles) - 2:
-                            if pptype != "RMR":
-                                raise ValueError(
-                                    f"Ensemble {ens_num} has invalid pptype {pptype}."
-                                )
-                            e_offset = np.random.choice([0, -1])
-                            s_offset = -1 - e_offset
-                    
-                    # print(f"{out_traj.path_number}, pptype: {pptype}, sh_region: {sh_region}")
-                    self.traj_data[traj_num] = {
-                        "ens_save_idx": ens_save_idx,
-                        "max_op": out_traj.ordermax,
-                        "min_op": out_traj.ordermin,
-                        "length": out_traj.length,
-                        "adress": out_traj.adress,
-                        "weights": out_traj.weights,
-                        "frac": np.zeros(self.n, dtype="longdouble"),
-                        "ptype": str(st[1] + s_offset) + pptype + str(end[1] + e_offset),
-                        "sh_region": out_traj.sh_region,
-                        "mc_move": getattr(out_traj, 'generated', 'initial'),
-                        "ensemble": ens_num,
-                    }
-                traj_num += 1
+                                e_offset = np.random.choice([0, -1])
+                                s_offset = -1 - e_offset
+                        
+                        # print(f"{out_traj.path_number}, pptype: {pptype}, sh_region: {sh_region}")
+                        self.traj_data[traj_num] = {
+                            "ens_save_idx": ens_save_idx,
+                            "max_op": out_traj.ordermax,
+                            "min_op": out_traj.ordermin,
+                            "length": out_traj.length,
+                            "adress": out_traj.adress,
+                            "weights": out_traj.weights,
+                            "frac": np.zeros(self.n, dtype="longdouble"),
+                            "ptype": str(st[1] + s_offset) + pptype + str(end[1] + e_offset),
+                            "sh_region": out_traj.sh_region,
+                            "mc_move": getattr(out_traj, 'generated', 'initial'),
+                            "ensemble": ens_num,
+                        }
+                    traj_num += 1
                 if (
                     self.config["output"].get("delete_old", False)
                     and pn_old > self.n - 2
                 ):
                     if len(self.pn_olds) > self.n - 2:
                         pn_old_del, del_dic = next(iter(self.pn_olds.items()))
-                        # delete trajectory files
-                        for adress in del_dic["adress"]:
-                            os.remove(adress)
-                        # delete txt files
                         load_dir = self.config["simulation"]["load_dir"]
+                        if self.config["output"]["keep_maxop_trajs"]:
+                            path_dir = os.path.join(load_dir, pn_old_del)
+                            # delete trajectory files if low orderp (infinit)
+                            # and directory is not a symlink
+                            if del_dic["max_op"][
+                                0
+                            ] < self.maxop and not os.path.islink(path_dir):
+                                # update maxop and then delete|
+                                for adress in del_dic["adress"]:
+                                    os.remove(adress)
+                        else:
+                            # delete trajectory files
+                            for adress in del_dic["adress"]:
+                                os.remove(adress)
+                        # delete txt files
                         if self.config["output"].get("delete_old_all", False):
                             for txt in ("order.txt", "traj.txt", "energy.txt"):
                                 txt_adress = os.path.join(
@@ -1157,9 +1168,11 @@ class REPEX_state_staple(REPEX_state):
                     if len(self.pn_olds) <= self.n - 2:
                         self.pn_olds[str(pn_old)] = {
                             "adress": self.traj_data[pn_old]["adress"],
+                            "max_op": self.traj_data[pn_old]["max_op"],
+                            "min_op": self.traj_data[pn_old]["min_op"],
                         }
-            pn_news.append(out_traj.path_number)
-            self.add_traj(ens_num, out_traj, valid=out_traj.weights)
+                pn_news.append(out_traj.path_number)
+                self.add_traj(ens_num, out_traj, valid=out_traj.weights)
 
         # record weights
         locked_trajs = self.locked_paths()
@@ -1174,7 +1187,10 @@ class REPEX_state_staple(REPEX_state):
             write_to_pathens(self, md_items["pnum_old"])
 
         self.sort_trajstate()
-        self.config["current"]["traj_num"] = traj_num
+        cdict = self.config["current"]
+        cdict["traj_num"] = traj_num
+        cdict["wsubcycles"][md_items["pin"]] += md_items["subcycles"]
+        cdict["tsubcycles"] = int(sum(self.config["current"]["wsubcycles"]))
         self.cworker = md_items["pin"]
         
         if self.printing():
