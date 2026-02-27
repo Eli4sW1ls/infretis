@@ -273,7 +273,7 @@ class REPEX_state_staple(REPEX_state):
     @profiled
     def add_traj(self, ens, traj, valid, count=True, n=0):
         """Add traj to state and calculate P matrix.
-        
+
         When infinite swap is disabled, behaves like REPPTIS where each path
         stays in its own ensemble with 100% probability.
         """
@@ -1152,7 +1152,8 @@ class REPEX_state_staple(REPEX_state):
                             os.getcwd(), self.config["simulation"]["load_dir"]
                         ),
                     }
-                    out_traj = self.pstore.output(self.cstep, data)
+                    with global_profiler.profile_operation("treat_output:pstore_output"):
+                        out_traj = self.pstore.output(self.cstep, data)
                     if ens_num <= -1:
                         chk_intf = out_traj.check_interfaces(self.ensembles[ens_num + 1]['interfaces'])
                         self.traj_data[traj_num] = {
@@ -1280,15 +1281,17 @@ class REPEX_state_staple(REPEX_state):
 
         # record weights
         locked_trajs = self.locked_paths()
-        if self._last_prob is None:
-            self.prob
+        with global_profiler.profile_operation("treat_output:prob"):
+            if self._last_prob is None:
+                self.prob
         for idx, live in enumerate(self.live_paths()):
             if live not in locked_trajs:
                 self.traj_data[live]["frac"] += self._last_prob[:-1][idx, :]
 
         # write succ data to infretis_data.txt
         if md_items["status"] == "ACC":
-            write_to_pathens(self, md_items["pnum_old"])
+            with global_profiler.profile_operation("treat_output:write_pathens"):
+                write_to_pathens(self, md_items["pnum_old"])
 
         self.sort_trajstate()
         cdict = self.config["current"]
@@ -1300,7 +1303,8 @@ class REPEX_state_staple(REPEX_state):
         if self.printing():
             self.print_shooted(md_items, pn_news)
         # save for possible restart
-        self.write_toml()
+        with global_profiler.profile_operation("treat_output:write_toml"):
+            self.write_toml()
 
         return md_items
 

@@ -343,7 +343,6 @@ class REPEX_state:
                     f" and does not have any phase points "
                     f"between {self.interfaces[ens-1]} and {cap}.\n"
                 )
-
             raise ValueError(raise_msg)
 
         # invalidate last prob
