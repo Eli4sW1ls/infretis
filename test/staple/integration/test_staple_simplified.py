@@ -67,7 +67,8 @@ class TestStapleWorkflowPractical:
                 "shooting_moves": ["st_sh", "st_sh", "st_sh", "st_sh"],
                 "mode": "staple",
                 "maxlength": 1000,
-                "seed": 42
+                "seed": 42,
+                "steps": 100
             }
         }
         

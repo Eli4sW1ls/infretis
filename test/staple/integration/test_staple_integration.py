@@ -103,7 +103,8 @@ class TestStapleWorkflowIntegration:
                 "interfaces": [0.1, 0.3, 0.5],
                 "all_intfs": [0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.55],
                 "shooting_moves": ["st_sh", "st_sh", "st_sh", "st_sh"],
-                "mode": "staple"
+                "mode": "staple",
+                "steps": 100
             },
             "output": {"data_dir": ".", "pattern": False}
         }
@@ -371,7 +372,8 @@ class TestStaplePerformanceIntegration:
                 "tis_set": {
                     "interface_cap": 1.0,
                     "maxlength": 1000
-                }
+                },
+                "steps": 100
             },
             "output": {"data_dir": ".", "pattern": False}
         }
@@ -473,12 +475,13 @@ class TestStapleWorkflowIntegration:
                 "tis_set": {
                     "interface_cap": 0.5,
                     "maxlength": 1000
-                }
+                },
+                "steps": 100
             },
             "output": {"data_dir": ".", "pattern": False}
         }
         
-        state = REPEX_state_staple(config, minus=False)
+        state = REPEX_state_staple(config)
         
         # Initialize with staple paths
         initial_paths = {}
@@ -492,16 +495,50 @@ class TestStapleWorkflowIntegration:
             1: {"interfaces": (0.1, 0.1, 0.2)},
             2: {"interfaces": (0.1, 0.2, 0.3)}
         }
-        
-        # Load paths - skip this due to complex pptype validation
-        pytest.skip("Skipping load_paths test due to ongoing pptype validation development")
+
+        # REPEX_state_staple always calls super().__init__(..., minus=True) internally,
+        # so _offset=1 and n = size + 1 = 4 regardless of the minus= argument.
+        # Live slots are _trajs[0..2]; ghost is _trajs[3].
+        # Map: initial_paths[0] -> minus ens (-1) -> slot 0
+        #      initial_paths[1] -> ens 0            -> slot 1
+        #      initial_paths[2] -> ens 1            -> slot 2
+        assert state._offset == 1
+        assert state.n == 4
+
+        ens_map = [
+            (-1, initial_paths[0]),
+            (0,  initial_paths[1]),
+            (1,  initial_paths[2]),
+        ]
+        for ens_num, path in ens_map:
+            valid = np.zeros(state.n)
+            valid[ens_num + state._offset] = 1.0
+            state.add_traj(ens_num, path, tuple(valid))
+
+        # All 3 live slots should now hold the correct paths
+        live = state.live_paths()
+        assert len(live) == 3
+        expected_pns = {initial_paths[i].path_number for i in range(3)}
+        assert set(live) == expected_pns
+
+        assert state._trajs[0].path_number == initial_paths[0].path_number
+        assert state._trajs[1].path_number == initial_paths[1].path_number
+        assert state._trajs[2].path_number == initial_paths[2].path_number
+
+        # StaplePath-specific properties survive storage
+        assert state._trajs[1].pptype == initial_paths[1].pptype
+        assert state._trajs[2].sh_region == initial_paths[2].sh_region
+
+        # P-matrix has the right shape (identity-like with staple_infinite_swap=False)
+        p = state.prob
+        assert p.shape == (state.n, state.n)
 
     def test_staple_path_persistence(self):
         """Test that staple paths maintain properties through REPEX cycle."""
         config = {
             "current": {"size": 2, "cstep": 0, "active": [0, 1], "locked": [], "traj_num": 2, "frac": {}},
             "runner": {"workers": 1},
-            "simulation": {"seed": 42, "interfaces": [0.1, 0.2, 0.3], "shooting_moves": ["st_sh", "st_sh"], "mode": "staple"},
+            "simulation": {"seed": 42, "interfaces": [0.1, 0.2, 0.3], "shooting_moves": ["st_sh", "st_sh"], "mode": "staple", "steps": 100},
             "output": {"data_dir": ".", "pattern": False}
         }
         
@@ -533,6 +570,7 @@ class TestStapleWorkflowIntegration:
                 "interfaces": [0.1, 0.2, 0.3, 0.4], 
                 "shooting_moves": ["st_sh", "st_sh", "st_sh", "st_sh"],  # Need 4 moves for 4 interfaces
                 "mode": "staple",
+                "steps": 100,
                 "tis_set": {
                     "interface_cap": 0.5,
                     "maxlength": 1000
@@ -565,10 +603,44 @@ class TestStapleWorkflowIntegration:
             2: {"interfaces": (0.1, 0.2, 0.3)},
             3: {"interfaces": (0.2, 0.3, 0.4)}
         }
-        
-        # Load all paths
-        # Skip load_paths due to complex pptype validation
-        pytest.skip("Skipping load_paths test due to ongoing pptype validation development")
+
+        # REPEX_state_staple always uses minus=True internally, so:
+        # n = size + 1 = 5, _offset = 1, live slots = _trajs[0..3], ghost = _trajs[4].
+        # Map: paths[0] (minus) -> ens -1 -> slot 0
+        #      paths[1]         -> ens  0 -> slot 1
+        #      paths[2]         -> ens  1 -> slot 2
+        #      paths[3]         -> ens  2 -> slot 3
+        assert state._offset == 1
+        assert state.n == 5
+
+        ens_map = [
+            (-1, paths[0]),
+            (0,  paths[1]),
+            (1,  paths[2]),
+            (2,  paths[3]),
+        ]
+        for ens_num, path in ens_map:
+            valid = np.zeros(state.n)
+            valid[ens_num + state._offset] = 1.0
+            state.add_traj(ens_num, path, tuple(valid))
+
+        # All 4 live slots populated
+        live = state.live_paths()
+        assert len(live) == 4
+        assert set(live) == {paths[i].path_number for i in range(4)}
+
+        for slot, path in enumerate([paths[0], paths[1], paths[2], paths[3]]):
+            assert state._trajs[slot].path_number == path.path_number
+
+        # pptype diversity is preserved across ensembles
+        assert paths[0].pptype == (0, "LML")
+        assert paths[1].pptype == (1, "LMR")
+        assert paths[2].pptype == (2, "RML")
+        assert paths[3].pptype == (3, "LMR")
+
+        # P-matrix dimensions reflect the full state
+        p = state.prob
+        assert p.shape == (state.n, state.n)
 
 
 class TestStaplePerformance:
@@ -731,7 +803,7 @@ class TestStapleWorkflowValidation:
         config = {
             "current": {"size": 2, "cstep": 0, "active": [0, 1], "locked": [], "traj_num": 2, "frac": {}},
             "runner": {"workers": 1},
-            "simulation": {"seed": 42, "interfaces": [0.1, 0.2, 0.3], "shooting_moves": ["st_sh", "st_sh"], "mode": "staple"},
+            "simulation": {"seed": 42, "interfaces": [0.1, 0.2, 0.3], "shooting_moves": ["st_sh", "st_sh"], "mode": "staple", "steps": 100},
             "output": {"data_dir": ".", "pattern": False}
         }
         

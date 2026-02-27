@@ -19,7 +19,8 @@ def repex_state():
         'simulation': {
             'seed': 42,
             'shooting_moves': ['sh'] * 6,
-            'interfaces': [0, 1, 2, 3, 4, 5]
+            'interfaces': [0, 1, 2, 3, 4, 5],
+            'steps': 100
         },
         'output': {},
         'runner': {'workers': 1}

@@ -116,7 +116,8 @@ class TestStapleWorkflowEndToEnd:
                 "all_intfs": [0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5],
                 "shooting_moves": ["st_sh", "st_sh", "st_sh", "st_sh"],
                 "mode": "staple",
-                "maxlength": 1000
+                "maxlength": 1000,
+                "steps": 100
             },
             "output": {"data_dir": ".", "pattern": False}
         }
@@ -405,7 +406,7 @@ class TestStapleWorkflowEndToEnd:
         ens_set = {
             "interfaces": [0.2, 0.3, 0.4],
             "all_intfs": [0.2, 0.3, 0.4],  # Make same as interfaces to satisfy validation
-            "ens_name": "2",
+            "ens_name": "1",
             "tis_set": {"maxlength": 300},
             "rgen": np.random.default_rng(42)
         }
@@ -450,7 +451,8 @@ class TestStaplePathWorkflowValidation:
             "simulation": {
                 "interfaces": [0.1, 0.3, 0.5],
                 "shooting_moves": ["st_sh", "st_sh", "st_sh"],
-                "mode": "staple"
+                "mode": "staple",
+                "steps": 100
             }
         }
         

@@ -227,7 +227,7 @@ class TestStaplePermanentCalculation:
         return {
             "current": {"size": 3, "cstep": 0, "active": [0, 1, 2], "locked": [], "traj_num": 3, "frac": {}},
             "runner": {"workers": 1},
-            "simulation": {"seed": 42, "interfaces": [0.1, 0.3, 0.5], "shooting_moves": ["st_sh", "st_sh", "st_sh"], "mode": "staple"},
+            "simulation": {"seed": 42, "interfaces": [0.1, 0.3, 0.5], "shooting_moves": ["st_sh", "st_sh", "st_sh"], "mode": "staple", "steps": 100},
             "output": {"data_dir": ".", "pattern": False}
         }
 
@@ -1321,8 +1321,8 @@ class TestStaplePermanentCalculation:
             print(f"Matrix:\n{matrix}")
             
             # Test both implementations
-            base_state = REPEX_state({"current": {"size": 1}, "runner": {"workers": 1}, "simulation": {"seed": 0}})
-            staple_state = REPEX_state_staple({"current": {"size": 1}, "runner": {"workers": 1}, "simulation": {"seed": 0}})
+            base_state = REPEX_state({"current": {"size": 1, "cstep": 0}, "runner": {"workers": 1}, "simulation": {"seed": 0, "steps": 100}})
+            staple_state = REPEX_state_staple({"current": {"size": 1, "cstep": 0}, "runner": {"workers": 1}, "simulation": {"seed": 0, 'steps': 100}})
             
             base_p = base_state.permanent_prob(matrix)
             staple_p = staple_state.permanent_prob(matrix)
@@ -1355,8 +1355,8 @@ class TestStaplePermanentCalculation:
             print(f"Diagonal values: {np.diag(matrix)}")
             
             # Test both implementations
-            base_state = REPEX_state({"current": {"size": 1}, "runner": {"workers": 1}, "simulation": {"seed": 0}})
-            staple_state = REPEX_state_staple({"current": {"size": 1}, "runner": {"workers": 1}, "simulation": {"seed": 0}})
+            base_state = REPEX_state({"current": {"size": 1, "cstep": 0}, "runner": {"workers": 1}, "simulation": {"seed": 0, "steps": 100}})
+            staple_state = REPEX_state_staple({"current": {"size": 1, "cstep": 0}, "runner": {"workers": 1}, "simulation": {"seed": 0, "steps": 100}})
             
             base_p = base_state.permanent_prob(matrix)
             staple_p = staple_state.permanent_prob(matrix)
@@ -1391,8 +1391,8 @@ class TestStaplePermanentCalculation:
             print(f"Diagonal values: {np.diag(matrix)}")
             
             # Test both implementations
-            base_state = REPEX_state({"current": {"size": 1}, "runner": {"workers": 1}, "simulation": {"seed": 0}})
-            staple_state = REPEX_state_staple({"current": {"size": 1}, "runner": {"workers": 1}, "simulation": {"seed": 0}})
+            base_state = REPEX_state({"current": {"size": 1, "cstep": 0}, "runner": {"workers": 1}, "simulation": {"seed": 0, "steps": 100}})
+            staple_state = REPEX_state_staple({"current": {"size": 1, "cstep": 0}, "runner": {"workers": 1}, "simulation": {"seed": 0, "steps": 100}})
             
             base_p = base_state.permanent_prob(matrix)
             staple_p = staple_state.permanent_prob(matrix)
@@ -1424,8 +1424,8 @@ class TestStaplePermanentCalculation:
         print(f"Matrix:\n{matrix}")
         
         # Test both implementations
-        base_state = REPEX_state({"current": {"size": 1}, "runner": {"workers": 1}, "simulation": {"seed": 0}})
-        staple_state = REPEX_state_staple({"current": {"size": 1}, "runner": {"workers": 1}, "simulation": {"seed": 0}})
+        base_state = REPEX_state({"current": {"size": 1, "cstep": 0}, "runner": {"workers": 1}, "simulation": {"seed": 0, "steps": 100}})
+        staple_state = REPEX_state_staple({"current": {"size": 1, "cstep": 0}, "runner": {"workers": 1}, "simulation": {"seed": 0, "steps": 100}})
         
         base_p = base_state.permanent_prob(matrix)
         staple_p = staple_state.permanent_prob(matrix)
@@ -1452,8 +1452,8 @@ class TestStaplePermanentCalculation:
         print(f"Max value: {np.max(matrix)}")
         
         # Test both implementations
-        base_state = REPEX_state({"current": {"size": 1}, "runner": {"workers": 1}, "simulation": {"seed": 0}})
-        staple_state = REPEX_state_staple({"current": {"size": 1}, "runner": {"workers": 1}, "simulation": {"seed": 0}})
+        base_state = REPEX_state({"current": {"size": 1, "cstep": 0}, "runner": {"workers": 1}, "simulation": {"seed": 0, "steps": 100}})
+        staple_state = REPEX_state_staple({"current": {"size": 1, "cstep": 0}, "runner": {"workers": 1}, "simulation": {"seed": 0, "steps": 100}})
         
         base_p = base_state.permanent_prob(matrix)
         staple_p = staple_state.permanent_prob(matrix)
@@ -1484,8 +1484,8 @@ class TestStaplePermanentCalculation:
         print(f"Max value: {np.max(matrix)}")
         
         # Test both implementations
-        base_state = REPEX_state({"current": {"size": 1}, "runner": {"workers": 1}, "simulation": {"seed": 0}})
-        staple_state = REPEX_state_staple({"current": {"size": 1}, "runner": {"workers": 1}, "simulation": {"seed": 0}})
+        base_state = REPEX_state({"current": {"size": 1, "cstep": 0}, "runner": {"workers": 1}, "simulation": {"seed": 0, "steps": 100}})
+        staple_state = REPEX_state_staple({"current": {"size": 1, "cstep": 0}, "runner": {"workers": 1}, "simulation": {"seed": 0, "steps": 100}})
         
         base_p = base_state.permanent_prob(matrix)
         staple_p = staple_state.permanent_prob(matrix)
@@ -1519,8 +1519,8 @@ class TestStaplePermanentCalculation:
                 matrix = create_test_matrix(size, matrix_type, seed=42)
                 
                 # Test both implementations with timing
-                base_state = REPEX_state({"current": {"size": 1}, "runner": {"workers": 1}, "simulation": {"seed": 0}})
-                staple_state = REPEX_state_staple({"current": {"size": 1}, "runner": {"workers": 1}, "simulation": {"seed": 0}})
+                base_state = REPEX_state({"current": {"size": 1, "cstep": 0}, "runner": {"workers": 1}, "simulation": {"seed": 0, "steps": 100}})
+                staple_state = REPEX_state_staple({"current": {"size": 1, "cstep": 0}, "runner": {"workers": 1}, "simulation": {"seed": 0, "steps": 100}})
                 
                 # Time permanent_prob
                 start_time = time.time()
@@ -1578,8 +1578,8 @@ class TestStaplePermanentCalculation:
             print(f"Matrix:\n{matrix}")
             
             # Test both implementations
-            base_state = REPEX_state({"current": {"size": 1}, "runner": {"workers": 1}, "simulation": {"seed": 0}})
-            staple_state = REPEX_state_staple({"current": {"size": 1}, "runner": {"workers": 1}, "simulation": {"seed": 0}})
+            base_state = REPEX_state({"current": {"size": 1, "cstep": 0}, "runner": {"workers": 1}, "simulation": {"seed": 0, "steps": 100}})
+            staple_state = REPEX_state_staple({"current": {"size": 1, "cstep": 0}, "runner": {"workers": 1}, "simulation": {"seed": 0, "steps": 100}})
             
             base_p = base_state.permanent_prob(matrix)
             staple_p = staple_state.permanent_prob(matrix)
@@ -1612,7 +1612,7 @@ class TestStaplePermanentCalculation:
             print(f"Sparsity: {np.count_nonzero(matrix == 0) / (size * size):.2%} zeros")
             
             # Test STAPLE implementation
-            staple_state = REPEX_state_staple({"current": {"size": 1}, "runner": {"workers": 1}, "simulation": {"seed": 0}})
+            staple_state = REPEX_state_staple({"current": {"size": 1, "cstep": 0}, "runner": {"workers": 1}, "simulation": {"seed": 0, "steps": 100}})
             staple_p = staple_state.permanent_prob(matrix)
             staple_perm = staple_state.fast_glynn_perm(matrix)
             
@@ -1635,7 +1635,7 @@ class TestStaplePermanentCalculation:
         print(f"Scale ratio: {np.max(matrix) / np.min(matrix):.2e}")
         
         # Test STAPLE implementation
-        staple_state = REPEX_state_staple({"current": {"size": 1}, "runner": {"workers": 1}, "simulation": {"seed": 0}})
+        staple_state = REPEX_state_staple({"current": {"size": 1, "cstep": 0}, "runner": {"workers": 1}, "simulation": {"seed": 0, "steps": 100}})
         staple_p = staple_state.permanent_prob(matrix)
         staple_perm = staple_state.fast_glynn_perm(matrix)
         

@@ -29,7 +29,8 @@ class TestREPEXStateStaple:
                 "seed": 42,
                 "interfaces": [0.1, 0.3, 0.5],
                 "shooting_moves": ["st_sh", "st_sh", "st_sh"],
-                "mode": "staple"
+                "mode": "staple",
+                "steps": 100
             },
             "output": {"data_dir": ".", "pattern": False}
         }
@@ -359,26 +360,80 @@ class TestREPEXStateStapleTreatOutput:
                 "shooting_moves": ["st_sh", "st_sh", "st_sh"],
                 "mode": "staple",
                 "load_dir": ".",
-                "tis_set": {"interface_cap": None}
+                "tis_set": {"interface_cap": None},
+                "steps": 100
             },
-            "output": {"data_dir": ".", "pattern": False}
+            "output": {"data_dir": "test", "pattern": False}
         }
 
-    def create_valid_staple_path(self):
-        """Create a valid staple path with proper turns."""
+    def _make_dummy_path(self, path_number, pptype_ens=0, pptype_str="LML"):
+        """Return a minimal StaplePath with the given path_number."""
         path = StaplePath()
-        # Create path with valid start and end turns
-        orders = [0.05, 0.15, 0.35, 0.55, 0.35, 0.15, 0.05]  # Valid staple pattern
+        for i, order in enumerate([0.05, 0.15, 0.35, 0.55, 0.35, 0.15, 0.05]):
+            system = System()
+            system.order = [order]
+            system.config = (f"frame_{path_number}_{i}.xyz", i)
+            path.append(system)
+        path.path_number = path_number
+        path.status = "ACC"
+        path.weights = None
+        path.pptype = (pptype_ens, pptype_str)
+        path.sh_region = {pptype_ens: (1, 5)}
+        return path
+
+    def _setup_state(self, config):
+        """Create a REPEX_state_staple with _trajs/traj_data/pstore pre-filled."""
+        state = REPEX_state_staple(config, minus=False)
+        # n=4 (size=3 + 1 for minus offset); _trajs has 4 slots, last is ghost.
+        # Populate the 3 live slots with dummy paths so live_paths() / locked_paths() work.
+        for slot in range(state.n - 1):  # slots 0, 1, 2
+            pn = slot + 100  # path numbers 100, 101, 102
+            dummy = self._make_dummy_path(pn, pptype_ens=0)
+            state._trajs[slot] = dummy
+            state.traj_data[pn] = {
+                "ens_save_idx": slot,
+                "length": 7,
+                "max_op": (0.55, 3),
+                "min_op": (0.05, 0),
+                "frac": np.zeros(state.n, dtype="longdouble"),
+                "adress": set(),
+                "weights": None,
+            }
+        # Pre-populate an entry for the traj_num that will be created next,
+        # because treat_output only sets traj_data[traj_num] in the else
+        # (rejected) branch, not for accepted positive-ensemble paths.
+        next_traj_num = config["current"]["traj_num"]
+        state.traj_data[next_traj_num] = {
+            "frac": np.zeros(state.n, dtype="longdouble")
+        }
+        # Pstore mock: just return the path unchanged
+        state.pstore = MagicMock()
+        state.pstore.output = lambda step, data: data["path"]
+        # Ensembles: treat_output sets ensembles[ens_num+1] from picked, but
+        # other slots should exist for later calls.
+        state.ensembles = {
+            0: {"interfaces": (float("-inf"), 0.1, 0.1)},
+            1: {"interfaces": (0.1, 0.1, 0.3)},
+            2: {"interfaces": (0.1, 0.3, 0.5)},
+            3: {"interfaces": (0.1, 0.3, 0.5)},
+        }
+        return state
+
+    def create_valid_staple_path(self):
+        """Create a valid staple path for ensemble 0 with proper turns."""
+        path = StaplePath()
+        orders = [0.05, 0.15, 0.35, 0.55, 0.35, 0.15, 0.05]
         for i, order in enumerate(orders):
             system = System()
             system.order = [order]
             system.config = (f"valid_frame_{i}.xyz", i)
             path.append(system)
-        
         path.path_number = 1
         path.status = "ACC"
-        path.sh_region = (1, len(orders) - 2)  # Valid shooting region
-        path.pptype = (1, "LML")  # Valid path type as tuple
+        # ens_num=0 in the test picked dict, so pptype ensemble index must be 0
+        path.pptype = (0, "LML")
+        path.sh_region = {0: (1, 5)}
+        path.weights = None
         return path
 
     def create_invalid_turn_path(self):
@@ -397,134 +452,115 @@ class TestREPEXStateStapleTreatOutput:
         return path
 
     def test_treat_output_valid_staple_path(self, basic_config):
-        """Test treat_output with valid staple path."""
-        state = REPEX_state_staple(basic_config, minus=False)
-        
-        # Initialize required trajectory data
+        """Test treat_output succeeds with a valid accepted staple path."""
+        basic_config["current"]["traj_num"] = 10
+        state = self._setup_state(basic_config)
+        # traj_data for pn_old=1 so ens_save_idx is found
         state.traj_data[1] = {
-            "ens_save_idx": 0,
-            "length": 7,
-            "max_op": [0.55],
-            "min_op": [0.05],
-            "frac": np.zeros(state.n)
+            "ens_save_idx": 0, "length": 7,
+            "max_op": (0.55, 3), "min_op": (0.05, 0),
+            "frac": np.zeros(state.n, dtype="longdouble"),
+            "adress": set(), "weights": None,
         }
-        
-        # Create mock md_items with staple path
+
         valid_path = self.create_valid_staple_path()
+        # status="ACC" -> path is saved, traj_data for positive ensembles
+        # is not re-set inside treat_output (the else branch handles rejections).
+        # _setup_state pre-populates traj_data[traj_num] so live_paths works.
         md_items = {
-            "picked": {
-                0: {
-                    "pn_old": 1,
-                    "traj": valid_path,
-                    "ens": {"interfaces": [0.1, 0.3, 0.5]}
-                }
-            },
-            "status": "ACC",
-            "md_start": 0.0,
-            "md_end": 1.0,
-            "pnum_old": [1]
+            "picked": {0: {"pn_old": 1, "traj": valid_path, "ens": {"interfaces": [0.1, 0.3, 0.5]}}},
+            "status": "ACC", "md_start": 0.0, "md_end": 1.0,
+            "pnum_old": [1], "pin": 0,
         }
-        
-        # Mock required methods and attributes
-        state.config = basic_config
-        state.config["current"]["traj_num"] = 10
-        
-        # Mock file operations to prevent FileNotFoundError
-        with patch('shutil.copy') as mock_copy, \
-             patch('os.path.exists') as mock_exists:
-            mock_exists.return_value = True
-            mock_copy.return_value = None
-            
-            try:
-                result = state.treat_output(md_items)
-                # If successful, verify the result structure
-                assert result is not None
-            except (KeyError, AttributeError, NotImplementedError, FileNotFoundError) as e:
-                # Expected for incomplete mock setup or unimplemented methods
-                pytest.skip(f"treat_output not fully implemented: {e}")
+
+        with patch("infretis.classes.repex_staple.write_to_pathens"), \
+             patch.object(state, "write_toml"), \
+             patch.object(state, "printing", return_value=False):
+            result = state.treat_output(md_items)
+
+        assert result is not None
+        assert result["status"] == "ACC"
 
     def test_treat_output_invalid_turns_error(self, basic_config):
-        """Test treat_output handles invalid turns gracefully."""
-        state = REPEX_state_staple(basic_config, minus=False) 
-        
-        # Initialize required trajectory data
+        """Test treat_output raises ValueError for a rejected path with invalid turns.
+
+        The else-branch (rejected / non-ACC paths with an existing path_number)
+        calls check_turns and raises ValueError when valid=False.  A path whose
+        order-parameter values never leave the interior of the interface window
+        (i.e. never reaches a boundary or re-crosses enough interfaces) returns
+        valid=False from check_turns.
+        """
+        basic_config["current"]["traj_num"] = 10
+        state = self._setup_state(basic_config)
         state.traj_data[1] = {
-            "ens_save_idx": 0,
-            "length": 5,
-            "max_op": [0.5],
-            "min_op": [0.1],
-            "frac": np.zeros(state.n)
+            "ens_save_idx": 0, "length": 3,
+            "max_op": (0.28, 2), "min_op": (0.2, 0),
+            "frac": np.zeros(state.n, dtype="longdouble"),
+            "adress": set(), "weights": None,
         }
-        
-        # Create path without valid turns
-        invalid_path = self.create_invalid_turn_path()
-        
+
+        # A path that stays entirely inside (0.1, 0.3) – never reaches any boundary,
+        # so check_turns returns valid=False.
+        bad_path = StaplePath()
+        for i, order in enumerate([0.20, 0.25, 0.28]):
+            system = System()
+            system.order = [order]
+            system.config = (f"bad_frame_{i}.xyz", i)
+            bad_path.append(system)
+        # path_number must be set (not None) so we enter the else-branch
+        bad_path.path_number = 1
+        bad_path.pptype = None
+        bad_path.sh_region = {}
+        bad_path.weights = None
+
         md_items = {
-            "picked": {
-                0: {
-                    "pn_old": 1,
-                    "traj": invalid_path,
-                    "ens": {"interfaces": [0.1, 0.3, 0.5]}
-                }
-            },
-            "status": "ACC",
-            "md_start": 0.0,
-            "md_end": 1.0,
-            "pnum_old": [1]
+            "picked": {0: {"pn_old": 1, "traj": bad_path, "ens": {"interfaces": [0.1, 0.3, 0.5]}}},
+            # non-ACC status forces the else-branch (rejected path handling)
+            "status": "NCR", "md_start": 0.0, "md_end": 1.0,
+            "pnum_old": [1], "pin": 0,
         }
-        
-        state.config = basic_config
-        state.config["current"]["traj_num"] = 10
-        
-        # The method should handle invalid turns (may reject path or raise error)
-        with patch('shutil.copy') as mock_copy, \
-             patch('os.path.exists') as mock_exists:
-            mock_exists.return_value = True
-            mock_copy.return_value = None
-            
-            try:
-                result = state.treat_output(md_items)
-                # If no exception, check that path was properly handled
-                assert result is not None
-            except (ValueError, AttributeError, KeyError, FileNotFoundError) as e:
-                # Expected behavior for invalid turns or file operations
-                pytest.skip(f"treat_output not fully implemented: {e}")
+
+        with patch("infretis.classes.repex_staple.write_to_pathens"), \
+             patch.object(state, "write_toml"), \
+             patch.object(state, "printing", return_value=False):
+            with pytest.raises(ValueError, match="valid turns"):
+                state.treat_output(md_items)
 
     def test_treat_output_sh_region_fallback(self, basic_config):
-        """Test treat_output handles missing sh_region/ptype."""
-        state = REPEX_state_staple(basic_config, minus=False)
-        
-        # Create path without proper sh_region/ptype
-        path = self.create_valid_staple_path()
-        path.sh_region = ()  # Invalid sh_region
-        path.pptype = None  # Invalid pptype (None)
-        
-        md_items = {
-            "picked": {
-                0: {
-                    "pn_old": 1,
-                    "traj": path,
-                    "ens": {"interfaces": [0.1, 0.3, 0.5]}
-                }
-            },
-            "status": "ACC",
-            "md_start": 0.0,
-            "md_end": 1.0,
-            "pnum_old": [1]
+        """Test treat_output computes sh_region via fallback when not pre-set.
+
+        When a rejected path (non-ACC, existing path_number) has a valid pptype
+        but its sh_region dict does not contain an entry for the current ensemble,
+        treat_output falls back to calling get_sh_region to compute it.
+        """
+        basic_config["current"]["traj_num"] = 10
+        state = self._setup_state(basic_config)
+        state.traj_data[1] = {
+            "ens_save_idx": 0, "length": 7,
+            "max_op": (0.55, 3), "min_op": (0.05, 0),
+            "frac": np.zeros(state.n, dtype="longdouble"),
+            "adress": set(), "weights": None,
         }
-        
-        # Should handle missing sh_region/ptype by using get_pp_path fallback
-        with patch('shutil.copy') as mock_copy, \
-             patch('os.path.exists') as mock_exists:
-            mock_exists.return_value = True
-            mock_copy.return_value = None
-            
-            try:
-                result = state.treat_output(md_items)
-                assert result is not None
-            except (ValueError, AttributeError, KeyError, FileNotFoundError) as e:
-                # Expected for fallback behavior or file operations
-                pytest.skip(f"treat_output not fully implemented: {e}")
+
+        path = self.create_valid_staple_path()
+        # Remove sh_region for ens_num=0 so the fallback code is triggered
+        path.sh_region = {}  # no entry for ensemble 0
+
+        md_items = {
+            "picked": {0: {"pn_old": 1, "traj": path, "ens": {"interfaces": [0.1, 0.3, 0.5]}}},
+            # non-ACC forces the else-branch
+            "status": "NCR", "md_start": 0.0, "md_end": 1.0,
+            "pnum_old": [1], "pin": 0,
+        }
+
+        with patch("infretis.classes.repex_staple.write_to_pathens"), \
+             patch.object(state, "write_toml"), \
+             patch.object(state, "printing", return_value=False):
+            result = state.treat_output(md_items)
+
+        # The fallback must have populated sh_region for ensemble 0
+        assert 0 in path.sh_region, "sh_region[0] should have been computed by get_sh_region fallback"
+        assert result is not None
 
 
 class TestStapleEnsembleValidation:
@@ -547,7 +583,8 @@ class TestStapleEnsembleValidation:
                 "seed": 42,
                 "interfaces": [0.1, 0.3, 0.5],
                 "shooting_moves": ["st_sh", "st_sh", "st_sh"],
-                "mode": "staple"
+                "mode": "staple",
+                "steps": 100
             },
             "output": {"data_dir": ".", "pattern": False}
         }
@@ -632,7 +669,8 @@ class TestStapleStateManagement:
                 "seed": 42,
                 "interfaces": [0.1, 0.3, 0.5],
                 "shooting_moves": ["st_sh", "st_sh", "st_sh"],
-                "mode": "staple"
+                "mode": "staple",
+                "steps": 100
             },
             "output": {"data_dir": ".", "pattern": False}
         }
@@ -757,7 +795,8 @@ class TestStapleMockEnhancement:
                 "shooting_moves": ["st_sh", "st_sh", "st_sh", "st_sh", "st_sh"],
                 "mode": "staple",
                 "load_dir": "./data",
-                "interface_cap": 0.5
+                "interface_cap": 0.5,
+                "steps": 200
             },
             "output": {
                 "data_dir": "./output",
@@ -855,7 +894,7 @@ class TestStapleConfigurationValidation:
         base_config = {
             "current": {"size": 3, "cstep": 0, "active": [0, 1, 2], "locked": [], "traj_num": 3, "frac": {}},
             "runner": {"workers": 1},
-            "simulation": {"seed": 42, "interfaces": [0.1, 0.3, 0.5], "mode": "staple"},
+            "simulation": {"seed": 42, "interfaces": [0.1, 0.3, 0.5], "mode": "staple", "steps": 100},
             "output": {"data_dir": ".", "pattern": False}
         }
         
@@ -876,7 +915,7 @@ class TestStapleConfigurationValidation:
         base_config = {
             "current": {"size": 3, "cstep": 0, "active": [0, 1, 2], "locked": [], "traj_num": 3, "frac": {}},
             "runner": {"workers": 1},
-            "simulation": {"seed": 42, "shooting_moves": ["st_sh", "st_sh", "st_sh"], "mode": "staple"},
+            "simulation": {"seed": 42, "shooting_moves": ["st_sh", "st_sh", "st_sh"], "mode": "staple", "steps": 100},
             "output": {"data_dir": ".", "pattern": False}
         }
         
@@ -905,7 +944,7 @@ class TestStapleConfigurationValidation:
         base_config = {
             "current": {"cstep": 0, "active": [], "locked": [], "traj_num": 3, "frac": {}},
             "runner": {"workers": 1},
-            "simulation": {"seed": 42, "interfaces": [0.1, 0.3, 0.5], "mode": "staple"},
+            "simulation": {"seed": 42, "interfaces": [0.1, 0.3, 0.5], "mode": "staple", "steps": 100},
             "output": {"data_dir": ".", "pattern": False}
         }
         
@@ -926,7 +965,7 @@ class TestStapleConfigurationValidation:
         """Test worker configuration validation."""
         base_config = {
             "current": {"size": 3, "cstep": 0, "active": [0, 1, 2], "locked": [], "traj_num": 3, "frac": {}},
-            "simulation": {"seed": 42, "interfaces": [0.1, 0.3, 0.5], "shooting_moves": ["st_sh", "st_sh", "st_sh"], "mode": "staple"},
+            "simulation": {"seed": 42, "interfaces": [0.1, 0.3, 0.5], "shooting_moves": ["st_sh", "st_sh", "st_sh"], "mode": "staple", "steps": 100},
             "output": {"data_dir": ".", "pattern": False}
         }
         
@@ -964,7 +1003,8 @@ class TestStapleIntegrationWorkflow:
                 "seed": 42,
                 "interfaces": [0.1, 0.3, 0.5],
                 "shooting_moves": ["st_sh", "st_sh", "st_sh"],
-                "mode": "staple"
+                "mode": "staple",
+                "steps": 100
             },
             "output": {"data_dir": ".", "pattern": False}
         }
@@ -1022,7 +1062,7 @@ class TestStapleIntegrationWorkflow:
         config = {
             "current": {"size": 2, "cstep": 0, "active": [0, 1], "locked": [], "traj_num": 3, "frac": {}},
             "runner": {"workers": 1},
-            "simulation": {"seed": 42, "interfaces": [0.2, 0.4], "shooting_moves": ["st_sh", "st_sh"], "mode": "staple"},
+            "simulation": {"seed": 42, "interfaces": [0.2, 0.4], "shooting_moves": ["st_sh", "st_sh"], "mode": "staple", "steps": 100},
             "output": {"data_dir": ".", "pattern": False}
         }
         

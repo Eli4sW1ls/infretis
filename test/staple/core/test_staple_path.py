@@ -938,7 +938,8 @@ class TestStapleConfigurationValidation:
                     "seed": 42,
                     "interfaces": [0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6],
                     "shooting_moves": ["sh", "sh", "sh"],
-                    "mode": "staple"
+                    "mode": "staple",
+                    "steps": 100
                 },
                 "output": {"data_dir": ".", "pattern": False}
             }
@@ -969,7 +970,8 @@ class TestStapleConfigurationValidation:
                     "interfaces": [0.1, 0.3, 0.5],
                     # Missing all_intfs
                     "shooting_moves": ["st_sh", "st_sh", "st_sh"],
-                    "mode": "staple"
+                    "mode": "staple",
+                    "steps": 100
                 },
                 "output": {"data_dir": ".", "pattern": False}
             }
