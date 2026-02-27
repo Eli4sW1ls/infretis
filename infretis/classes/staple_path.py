@@ -708,18 +708,20 @@ class StaplePath(Path):
     @profiled
     def copy(self) -> Path:
         """Return a copy of this path."""
-        
         new_path = self.empty_path(maxlen=self.maxlen)
-        for phasepoint in self.phasepoints:
-            new_path.append(phasepoint.copy())
+        # Bypass StaplePath.append to avoid N redundant _invalidate_cache() calls.
+        # Directly populate phasepoints and invalidate the cache once at the end.
+        new_path.phasepoints = [pp.copy() for pp in self.phasepoints]
         new_path.status = self.status
         new_path.time_origin = self.time_origin
         new_path.generated = self.generated
         new_path.maxlen = self.maxlen
         new_path.path_number = self.path_number
         new_path.weights = self.weights
-        new_path.sh_region = self.sh_region
+        # Deep-copy the mutable sh_region dict so the copy is independent.
+        new_path.sh_region = dict(self.sh_region)
         new_path.pptype = self.pptype
+        new_path._invalidate_cache()
         return new_path
     
     def empty_path(self, maxlen=DEFAULT_MAXLEN, **kwargs) -> StaplePath:

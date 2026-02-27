@@ -3,6 +3,7 @@ import logging
 import os
 import sys
 import time
+from collections import defaultdict
 from datetime import datetime
 import traceback
 
@@ -11,7 +12,7 @@ import itertools
 import tomli_w
 from numpy.random import default_rng
 import matplotlib.pyplot as plt
-from scipy.sparse.csgraph import connected_components
+
 
 from infretis.classes.repex import REPEX_state, spawn_rng
 from infretis.tools.performance_profiler import global_profiler
@@ -129,26 +130,45 @@ class REPEX_state_staple(REPEX_state):
 
     def find_blocks(self, arr):
         """
-        Find blocks in a W matrix using graph theory.
-        This is a robust method that can handle any matrix structure.
+        Find blocks in a W matrix using union-find (disjoint-set).
+
+        Avoids both the O(n²) dense boolean allocation of the original
+        implementation and the scipy sparse overhead (which dominated for
+        the small matrices that REPEX typically uses, n ~ 5-20).
+        O(nnz · alpha(n)) time, O(n) memory.
         """
         if arr.shape[0] != arr.shape[1]:
             raise ValueError("Input matrix must be square.")
-        
-        # Create a graph from the non-zero elements of the matrix
-        # Symmetrize the graph to ensure undirected components are found correctly
-        graph = (arr != 0) | (arr.T != 0)
-        
-        # Find connected components, which correspond to the blocks
-        n_components, labels = connected_components(csgraph=graph, directed=False, return_labels=True)
-        
-        blocks = []
-        for i in range(n_components):
-            # Find the indices of the nodes in the current component
-            block_indices = np.where(labels == i)[0]
-            blocks.append(block_indices)
-            
-        # Sort blocks by their starting index for deterministic processing
+
+        n = arr.shape[0]
+        if n == 0:
+            return []
+
+        # --- union-find with path compression ---
+        parent = list(range(n))
+
+        def find(x):
+            while parent[x] != x:
+                parent[x] = parent[parent[x]]  # path halving
+                x = parent[x]
+            return x
+
+        def union(x, y):
+            rx, ry = find(x), find(y)
+            if rx != ry:
+                parent[rx] = ry
+
+        # Connect nodes for every non-zero entry; symmetrize by unioning both ways
+        rows, cols = np.nonzero(arr)
+        for r, c in zip(rows.tolist(), cols.tolist()):
+            union(r, c)
+
+        # Group indices by root
+        groups: dict = defaultdict(list)
+        for i in range(n):
+            groups[find(i)].append(i)
+
+        blocks = [np.array(v, dtype=np.intp) for v in groups.values()]
         blocks.sort(key=lambda b: b[0])
         return blocks
 
@@ -167,49 +187,47 @@ class REPEX_state_staple(REPEX_state):
         # Create a submatrix with only the "live" (unlocked) rows and columns
         live_mat = input_mat[np.ix_(live_indices, live_indices)]
 
-        # 2. Find independent blocks in the live matrix (use binary version for connectivity)
-        binary_mat = np.where(live_mat != 0, 1, 0)
-        # print("live matrix:\n", live_mat)
-        # print("Binary matrix:\n", binary_mat)
+        # 2. Find independent blocks using sparse connectivity (live_mat passed directly;
+        #    find_blocks extracts non-zero positions internally — no binary_mat copy needed)
         with global_profiler.profile_operation("inf_retis:find_blocks"):
-            blocks = self.find_blocks(binary_mat)
-        
+            blocks = self.find_blocks(live_mat)
+
         out = np.zeros_like(live_mat, dtype="longdouble")
 
         # 3. Process each block independently
         for block_indices in blocks:
-            # Create a view of the sub-matrix for the current block using ACTUAL WEIGHTS
-            # Use the weighted live matrix (not the binary connectivity matrix)
             sub_matrix = live_mat[np.ix_(block_indices, block_indices)]
+            n_block = sub_matrix.shape[0]
 
-            if sub_matrix.shape[0] == 0:
+            if n_block == 0:
                 continue
-            
-            prob_matrix = np.zeros_like(sub_matrix, dtype="longdouble")
-            
-            # determine which algorithm will be used
-            if sub_matrix.shape[0] == 1:
+
+            # Determine algorithm once; reuse inside the profiled block
+            if n_block == 1:
                 algo = "trivial"
             elif np.all(np.isclose(sub_matrix, sub_matrix[0, :]) | (sub_matrix == 0)):
                 algo = "quick"
-            elif sub_matrix.shape[0] <= 12:
+            elif self._is_staple_structured(
+                np.where(sub_matrix != 0, 1, 0)
+            ):
+                algo = "contiguous"
+            elif n_block <= 12:
                 algo = "glynn"
             else:
                 algo = "random"
 
-            with global_profiler.profile_operation("inf_retis:block", additional_data={"size": sub_matrix.shape[0], "algo": algo}):
-                # Heuristics for choosing the best permanent algorithm
-                if sub_matrix.shape[0] == 1:
+            with global_profiler.profile_operation("inf_retis:block", additional_data={"size": n_block, "algo": algo}):
+                if algo == "trivial":
                     prob_matrix = np.array([[1.0]])
-                elif np.all(np.isclose(sub_matrix, sub_matrix[0, :]) | (sub_matrix == 0)):
+                elif algo == "quick":
                     prob_matrix = self.quick_prob(sub_matrix)
-                elif sub_matrix.shape[0] <= 12:
-                    # Use exact Glynn formula for small matrices
+                elif algo == "contiguous":
+                    prob_matrix = self._contiguous_permanent_prob(sub_matrix)
+                elif algo == "glynn":
                     prob_matrix = self.permanent_prob(sub_matrix)
                 else:
-                    # Fallback to probabilistic method for large, complex matrices
                     self._random_count += 1
-                    logger.info(f"Using random method for block of size {sub_matrix.shape[0]}")
+                    logger.info(f"Using random method for block of size {n_block}")
                     prob_matrix = self.random_prob(sub_matrix)
 
             # Place the calculated probability matrix into the correct block of the output matrix

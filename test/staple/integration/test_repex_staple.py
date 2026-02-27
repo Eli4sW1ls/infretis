@@ -351,7 +351,9 @@ class TestREPEXStateStapleTreatOutput:
                 "active": [0, 1, 2],
                 "locked": [],
                 "traj_num": 3,
-                "frac": {}
+                "frac": {},
+                "wsubcycles": [0],
+                "tsubcycles": 0,
             },
             "runner": {"workers": 1},
             "simulation": {
@@ -470,7 +472,7 @@ class TestREPEXStateStapleTreatOutput:
         md_items = {
             "picked": {0: {"pn_old": 1, "traj": valid_path, "ens": {"interfaces": [0.1, 0.3, 0.5]}}},
             "status": "ACC", "md_start": 0.0, "md_end": 1.0,
-            "pnum_old": [1], "pin": 0,
+            "pnum_old": [1], "pin": 0, "subcycles": 1,
         }
 
         with patch("infretis.classes.repex_staple.write_to_pathens"), \
@@ -515,9 +517,9 @@ class TestREPEXStateStapleTreatOutput:
 
         md_items = {
             "picked": {0: {"pn_old": 1, "traj": bad_path, "ens": {"interfaces": [0.1, 0.3, 0.5]}}},
-            # non-ACC status forces the else-branch (rejected path handling)
-            "status": "NCR", "md_start": 0.0, "md_end": 1.0,
-            "pnum_old": [1], "pin": 0,
+            # ACC triggers the validation branch where check_turns raises for bad paths
+            "status": "ACC", "md_start": 0.0, "md_end": 1.0,
+            "pnum_old": [1], "pin": 0, "subcycles": 0,
         }
 
         with patch("infretis.classes.repex_staple.write_to_pathens"), \
@@ -548,9 +550,9 @@ class TestREPEXStateStapleTreatOutput:
 
         md_items = {
             "picked": {0: {"pn_old": 1, "traj": path, "ens": {"interfaces": [0.1, 0.3, 0.5]}}},
-            # non-ACC forces the else-branch
-            "status": "NCR", "md_start": 0.0, "md_end": 1.0,
-            "pnum_old": [1], "pin": 0,
+            # ACC triggers the validation branch where sh_region fallback runs
+            "status": "ACC", "md_start": 0.0, "md_end": 1.0,
+            "pnum_old": [1], "pin": 0, "subcycles": 0,
         }
 
         with patch("infretis.classes.repex_staple.write_to_pathens"), \
@@ -576,7 +578,7 @@ class TestStapleEnsembleValidation:
                 "active": [0, 1, 2],
                 "locked": [],
                 "traj_num": 3,
-                "frac": {}
+                "frac": {},
             },
             "runner": {"workers": 1},
             "simulation": {
