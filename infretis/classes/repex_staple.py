@@ -9,7 +9,7 @@ import traceback
 
 import numpy as np
 import itertools
-import tomli_w
+# import tomli_w
 from numpy.random import default_rng
 import matplotlib.pyplot as plt
 
@@ -1229,6 +1229,12 @@ class REPEX_state_staple(REPEX_state):
                             "ensemble": ens_num,
                         }
                     traj_num += 1
+                    # On REJ: pop the displaced entry now — mirrors RETIS where the
+                    # old path stays in its slot so traj_data never grows unboundedly.
+                    # On ACC: write_to_pathens reads the old entry to write
+                    # infretis_data.txt and then pops it itself.
+                    if md_items["status"] != "ACC":
+                        self.traj_data.pop(pn_old, None)
                 if (
                     self.config["output"].get("delete_old", False)
                     and pn_old > self.n - 2
@@ -1313,6 +1319,7 @@ class REPEX_state_staple(REPEX_state):
             self.write_toml()
 
         return md_items
+
 
     def pattern_header(self):
         """Write pattern0 header."""
