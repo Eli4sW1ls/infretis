@@ -351,13 +351,24 @@ class REPEX_state_staple(REPEX_state):
         # For small matrices (< 5x5), optimization overhead isn't worth it
         if n < 5:
             return self.permanent_prob(arr)
-        
-        # For STAPLE matrices, check if we can use contiguous structure optimization
+
+        # For STAPLE matrices, check if we can use contiguous structure optimization,
+        # but only if the row bandwidth is small enough for the bitmask DP to be fast.
+        # A bandwidth > 10 → 2^bw states per DP layer → prohibitively slow in Python.
         if self._is_staple_structured(working_mat):
-            return self._contiguous_permanent_prob(arr)
-        else:
-            # Fall back to standard permanent_prob for non-STAPLE structures
+            bw = 0
+            for row in working_mat:
+                nz = np.flatnonzero(row)
+                if len(nz):
+                    bw = max(bw, int(nz[-1]) - int(nz[0]) + 1)
+            if bw <= 10:
+                return self._contiguous_permanent_prob(arr)
+            # Large bandwidth — fall through to random approximation below.
+        
+        if n <= 12:
             return self.permanent_prob(arr)
+        # Large unstructured block: use MC approximation (same as "random" algo path)
+        return self.random_prob(arr)
 
     def _is_staple_structured(self, working_mat):
         """Check if matrix has STAPLE structure: contiguous non-zero subsequences in each row."""
