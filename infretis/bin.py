@@ -34,7 +34,7 @@ def infretisrun():
     internalrun(input_file)
 
 
-def internalrun(input_file, enable_profiling=True):
+def internalrun(input_file, enable_profiling=False):
     """Run internal runner.
 
     infretis can now be called directly without argparse.
