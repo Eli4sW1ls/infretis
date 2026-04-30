@@ -902,9 +902,10 @@ class GromacsRunner:
 
     def close(self) -> None:
         """Close the file, in case that is explicitly needed."""
-        if self.fileh is not None and not self.fileh.closed:
+        fileh = getattr(self, "fileh", None)
+        if fileh is not None and not fileh.closed:
             logger.debug('Closing GROMACS file: "%s"', self.trr_file)
-            self.fileh.close()
+            fileh.close()
         for handle in (self.stdout, self.stderr):
             if handle is not None and not handle.closed:
                 handle.close()

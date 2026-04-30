@@ -580,11 +580,31 @@ class EngineBase(metaclass=ABCMeta):
                 )
                 logger.error("STDOUT, see file: %s", out_name)
                 logger.error("STDERR, see file: %s", err_name)
+                stderr_tail: str = ""
+                stdout_tail: str = ""
+                try:
+                    if os.path.isfile(err_name):
+                        with open(
+                            err_name, "r", encoding="utf-8", errors="replace"
+                        ) as err_handle:
+                            stderr_tail = err_handle.read().strip()
+                    if os.path.isfile(out_name):
+                        with open(
+                            out_name, "r", encoding="utf-8", errors="replace"
+                        ) as out_handle:
+                            stdout_tail = out_handle.read().strip()
+                except OSError:
+                    stderr_tail = ""
+                    stdout_tail = ""
                 msg = (
                     f"Execution of external program ({self.description}) "
                     f"failed with command:\n {cmd2}.\n"
                     f"Return code: {return_code}"
                 )
+                if stderr_tail:
+                    msg += f"\n\nSTDERR:\n{stderr_tail}"
+                if stdout_tail:
+                    msg += f"\n\nSTDOUT:\n{stdout_tail}"
                 raise RuntimeError(msg)
         if return_code is not None and return_code == 0:
             self._removefile(out_name)
