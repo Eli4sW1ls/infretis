@@ -121,6 +121,10 @@ def test_run_repptis(tmp_path: PosixPath) -> None:
     with open("infretis.toml", "wb") as f:
         tomli_w.dump(config, f)
 
+    # remove restart.toml
+    restart_file = PosixPath("restart.toml")
+    restart_file.unlink()
+
     success = os.system("infretisrun -i infretis.toml >| out.txt")
     assert success == 0
     assert (

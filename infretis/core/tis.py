@@ -86,6 +86,10 @@ def run_md(md_items: Dict[str, Any]) -> Dict[str, Any]:
                 minus=minus,
             )
             picked[ens_num]["traj"] = trial
+        else:
+            # passed to REPEX class, where it is then processed if rejected
+            # paths are to be stored
+            picked[ens_num]["rej_traj"] = trial
 
     md_items.update(
         {
@@ -584,8 +588,9 @@ def wire_fencing(
             succ_seg += 1
             new_segment = trial_seg.copy()
     if succ_seg == 0:
-        # No usable segments were generated.
-        trial_path.status = "NSG"
+        # No usable segments were generated
+        trial_path = trial_seg
+        trial_path.status = status
         success = False
     else:
         success, trial_path, _ = extender(
@@ -683,13 +688,15 @@ def extender(
 
     # Extender
     if interfaces[0] <= sh_pt.order[0] < interfaces[-1]:
+        # maxlen: subtract source_seg length, subtract 1 for forward extension
+        # and add 2 for the overlap with source_seg at start and end
         back_segment = source_seg.empty_path(
-            maxlen=ens_set["tis_set"]["maxlength"]
+            maxlen=ens_set["tis_set"]["maxlength"] - source_seg.length + 1
         )
         logger.debug("Trying to extend backwards")
         source_seg_copy = source_seg.copy()
 
-        shoot_backwards(
+        success = shoot_backwards(
             back_segment, source_seg_copy, sh_pt, ens_set, engine, start_cond
         )
         trial_path = paste_paths(
@@ -698,23 +705,29 @@ def extender(
             overlap=1,
             maxlen=ens_set["tis_set"]["maxlength"],
         )
+        # backwards extension failed
+        if not success and trial_path.length >= trial_path.maxlen:
+            trial_path.status = "BTX"
+            return False, trial_path, trial_path.status
     else:
         trial_path = source_seg.copy()
 
     sh_pt = trial_path.phasepoints[-1].copy()
     if interfaces[0] <= sh_pt.order[0] < interfaces[-1]:
+        # subtract source_seg length, add 1 for overlap with source_seg
         forth_segment = source_seg.empty_path(
-            maxlen=ens_set["tis_set"]["maxlength"]
+            maxlen=ens_set["tis_set"]["maxlength"] - trial_path.length + 1
         )
-        engine.propagate(forth_segment, ens_set, sh_pt)
+        success, status = engine.propagate(forth_segment, ens_set, sh_pt)
 
         trial_path.phasepoints = (
             trial_path.phasepoints[:-1] + forth_segment.phasepoints
         )
+        # forward extensions faile
+        if not success:
+            trial_path.status = "FTX"
+            return False, trial_path, trial_path.status
 
-    if trial_path.length >= ens_set["tis_set"]["maxlength"]:
-        trial_path.status = "FTX"  # exceeds "memory".
-        return False, trial_path, trial_path.status
     trial_path.status = "ACC"
     return True, trial_path, trial_path.status
 
@@ -961,7 +974,9 @@ def retis_swap_zero(
     path_tmp = path_old1.empty_path(maxlen=maxlen1 - 1)
     if allowed:
         logger.info("Propagating for [0^-]")
-        engine0.propagate(path_tmp, ens_set0, shpt_copy, reverse=True)
+        success, status = engine0.propagate(
+            path_tmp, ens_set0, shpt_copy, reverse=True
+        )
     else:
         logger.info("Not propagating for [0^-]")
         path_tmp.append(shpt_copy)
@@ -978,7 +993,7 @@ def retis_swap_zero(
     logger.info("Point is %s", phase_point.order)
     engine1.dump_phasepoint(phase_point, "second")
     path0.append(phase_point)
-    if path0.length == maxlen0:
+    if path0.length >= maxlen0:
         path0.status = "BTX"
     elif path0.length < 3:
         path0.status = "BTS"
@@ -989,6 +1004,9 @@ def retis_swap_zero(
         path0.status = "0-L"
     else:
         path0.status = "ACC"
+    # if propagation did not succeeed for some reason, reject the swap
+    if not success:
+        return False, [path0, path_old0], path0.status
 
     # 2. Generate path for [0^+] from [0^-]:
     logger.info("Creating path for [0^+] from [0^-]")
@@ -1007,7 +1025,9 @@ def retis_swap_zero(
         logger.info("Initial point is %s", system.order)
         # nsembles[1]['system'] = system
         logger.info("Propagating for [0^+]")
-        engine1.propagate(path_tmp, ens_set1, system, reverse=False)
+        success, status = engine1.propagate(
+            path_tmp, ens_set1, system, reverse=False
+        )
         # Ok, now we need to just add the SECOND LAST point from [0^-] as
         # the first point for the path:
         path1 = path_tmp.empty_path(maxlen=maxlen1)
@@ -1038,6 +1058,8 @@ def retis_swap_zero(
     else:
         path1.status = "ACC"
     logger.info("Done with swap zero!")
+    if not success:
+        return False, [path0, path1], path1.status
 
     # Final checks:
     accept = path0.status == "ACC" and path1.status == "ACC"
@@ -2178,7 +2200,7 @@ def staple_swap_zero(
     logger.info("Point is %s", phase_point.order)
     engine1.dump_phasepoint(phase_point, "second")
     path0.append(phase_point)
-    if path0.length == maxlen0:
+    if path0.length >= maxlen0:
         path0.status = "BTX"
     elif path0.length < 3:
         path0.status = "BTS"
@@ -2586,13 +2608,7 @@ def staple_extender(
             full_staple = source_seg.copy()
             # print("Turn segment:", [php.order[0] for php in turn_seg.phasepoints[:2]], [php.order[0] for php in source_seg.phasepoints[-2:]])
             for phasepoint in turn_seg.phasepoints[2:]:
-                app = full_staple.append(phasepoint)
-                if not app:
-                    msg = "Truncated while pasting forwards at: {}"
-                    msg = msg.format(full_staple.length)
-                    logger.warning(msg)
-                    full_staple.status = "FTX"
-                    success = False
+                full_staple.append(phasepoint)
             # print("length after pasting:", full_staple.length, source_seg.length+turn_seg.length - 2)
             full_staple.sh_region[int(ens_set["ens_name"])-1] = (1, source_seg.length - 2)
             full_staple.weight = 2.0
@@ -2644,13 +2660,7 @@ def staple_extender(
         
         # print("FW Turn segment:", [php.order[0] for php in fw_turn.phasepoints[:2]], [php.order[0] for php in source_seg.phasepoints[-2:]])
         for phasepoint in fw_turn.phasepoints[2:]:
-            app = full_staple.append(phasepoint)
-            if not app:
-                msg = "Truncated while pasting forwards at: {}"
-                msg = msg.format(full_staple.length)
-                logger.warning(msg)
-                full_staple.status = "FTX"
-                success = False
+            full_staple.append(phasepoint)
         # print("length after FW pasting:", full_staple.length, source_seg.length+bw_turn.length + fw_turn.length - 4)
         full_staple.sh_region[int(ens_set["ens_name"])-1] = (bw_turn.length - 1, bw_turn.length + source_seg.length - 4)
         full_staple.weight = 1.0

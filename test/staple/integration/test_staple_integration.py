@@ -99,7 +99,7 @@ class TestStapleWorkflowIntegration:
             },
             "runner": {"workers": 1},
             "simulation": {
-                "seed": 42,
+                "seed": 42, "zeroswap": 0.5, "pick_scheme": 0,
                 "interfaces": [0.1, 0.3, 0.5],
                 "all_intfs": [0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.55],
                 "shooting_moves": ["st_sh", "st_sh", "st_sh", "st_sh"],
@@ -362,7 +362,7 @@ class TestStaplePerformanceIntegration:
             },
             "runner": {"workers": 1},
             "simulation": {
-                "seed": 42,
+                "seed": 42, "zeroswap": 0.5, "pick_scheme": 0,
                 "interfaces": [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9],
                 "all_intfs": [0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 
                              0.45, 0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 
@@ -468,7 +468,7 @@ class TestStapleWorkflowIntegration:
             },
             "runner": {"workers": 1},
             "simulation": {
-                "seed": 42,
+                "seed": 42, "zeroswap": 0.5, "pick_scheme": 0,
                 "interfaces": [0.1, 0.2, 0.3, 0.4],
                 "shooting_moves": ["st_sh", "st_sh", "st_sh", "st_sh"],  # One move per interface
                 "mode": "staple",
@@ -538,7 +538,7 @@ class TestStapleWorkflowIntegration:
         config = {
             "current": {"size": 2, "cstep": 0, "active": [0, 1], "locked": [], "traj_num": 2, "frac": {}},
             "runner": {"workers": 1},
-            "simulation": {"seed": 42, "interfaces": [0.1, 0.2, 0.3], "shooting_moves": ["st_sh", "st_sh"], "mode": "staple", "steps": 100},
+            "simulation": {"seed": 42, "zeroswap": 0.5, "pick_scheme": 0, "interfaces": [0.1, 0.2, 0.3], "shooting_moves": ["st_sh", "st_sh"], "mode": "staple", "steps": 100},
             "output": {"data_dir": ".", "pattern": False}
         }
         
@@ -566,7 +566,7 @@ class TestStapleWorkflowIntegration:
             "current": {"size": 4, "cstep": 0, "active": [0, 1, 2], "locked": [], "traj_num": 4, "frac": {}},
             "runner": {"workers": 1},
             "simulation": {
-                "seed": 42, 
+                "seed": 42, "zeroswap": 0.5, "pick_scheme": 0, 
                 "interfaces": [0.1, 0.2, 0.3, 0.4], 
                 "shooting_moves": ["st_sh", "st_sh", "st_sh", "st_sh"],  # Need 4 moves for 4 interfaces
                 "mode": "staple",
@@ -803,7 +803,7 @@ class TestStapleWorkflowValidation:
         config = {
             "current": {"size": 2, "cstep": 0, "active": [0, 1], "locked": [], "traj_num": 2, "frac": {}},
             "runner": {"workers": 1},
-            "simulation": {"seed": 42, "interfaces": [0.1, 0.2, 0.3], "shooting_moves": ["st_sh", "st_sh"], "mode": "staple", "steps": 100},
+            "simulation": {"seed": 42, "zeroswap": 0.5, "pick_scheme": 0, "interfaces": [0.1, 0.2, 0.3], "shooting_moves": ["st_sh", "st_sh"], "mode": "staple", "steps": 100},
             "output": {"data_dir": ".", "pattern": False}
         }
         

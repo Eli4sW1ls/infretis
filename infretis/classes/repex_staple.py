@@ -1234,6 +1234,7 @@ class REPEX_state_staple(REPEX_state):
                 pn_old = picked[ens_num]["pn_old"]
                 out_traj = picked[ens_num]["traj"]
                 self.ensembles[ens_num + 1] = picked[ens_num]["ens"]
+                path_status = md_items["status"]
 
                 # ensure we always have an ens_save_idx (may be missing after restart)
                 ens_save_idx = None
@@ -1244,7 +1245,7 @@ class REPEX_state_staple(REPEX_state):
                     if str(pn_old) in lock[1]:
                         self.locked.pop(idx)
                 # if path is new: number and save the path:
-                if out_traj.path_number is None or md_items["status"] == "ACC":
+                if out_traj.path_number is None or path_status == "ACC":
                     # move to accept:
                     if ens_save_idx is None:
                         # fallback to old entry (should exist unless data corrupted)
@@ -1255,6 +1256,7 @@ class REPEX_state_staple(REPEX_state):
                         "dir": os.path.join(
                             os.getcwd(), self.config["simulation"]["load_dir"]
                         ),
+                        "status": path_status,
                     }
                     with global_profiler.profile_operation("treat_output:pstore_output"):
                         out_traj = self.pstore.output(self.cstep, data)
@@ -1333,6 +1335,22 @@ class REPEX_state_staple(REPEX_state):
                             "ensemble": ens_num,
                         }
                     traj_num += 1
+                # store rejected paths if status match the ones we want to keep
+                elif path_status in self.config["output"]["keep_status"]:
+                    rej_traj = picked[ens_num]["rej_traj"]
+                    rej_traj.path_number = pn_old
+                    data_rej = {
+                        "path": rej_traj,
+                        "dir": os.path.join(
+                            os.getcwd(), self.config["simulation"]["load_dir"]
+                        ),
+                        "status": path_status,
+                    }
+                    rej_traj = self.pstore.output(self.cstep, data_rej)
+                    # remove rejected trajectory files if delete_old = True
+                    if self.config["output"]["delete_old"]:
+                        for adress in rej_traj.adress:
+                            os.remove(adress)
                 if (
                     self.config["output"].get("delete_old", False)
                     and pn_old > self.n - 2

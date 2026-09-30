@@ -112,12 +112,11 @@ class TestEngineStapleFunctionality:
         system2.config = ("frame_1.xyz", 1)
         
         # Test add_to_path with StaplePath
-        status, success, stop, add = mock_engine.add_to_path(
+        status, success, stop = mock_engine.add_to_path(
             staple_path, system2, left, right, interfaces
         )
         
-        assert add  # Point should be added
-        assert staple_path.length == 2
+        assert staple_path.length == 2  # Point should be added
         
         # Check that the function handles StaplePath correctly
         assert status in ["Running propagate...", "Crossed left interface!", 
@@ -133,7 +132,7 @@ class TestEngineStapleFunctionality:
         system.order = [0.1]  # Below left interface
         system.config = ("frame_cross.xyz", 0)
         
-        status, success, stop, add = mock_engine.add_to_path(
+        status, success, stop = mock_engine.add_to_path(
             path, system, left, right
         )
         
@@ -158,13 +157,12 @@ class TestEngineStapleFunctionality:
         extra_system.order = [0.6]
         extra_system.config = ("frame_extra.xyz", 3)
         
-        status, success, stop, add = mock_engine.add_to_path(
+        status, success, stop = mock_engine.add_to_path(
             path, extra_system, left, right
         )
         
         assert not success
         assert stop
-        assert not add
         assert "Max. path length exceeded" in status
 
     def test_propagate_st_forward(self, mock_engine, mock_ens_set, sample_staple_path):

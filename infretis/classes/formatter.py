@@ -560,7 +560,11 @@ class FileIO(OutputBase):
 
     def flush(self) -> None:
         """Flush file buffers to file."""
-        if self.fileh is not None and not self.fileh.closed:
+        if (
+            self.fileh is not None
+            and not self.fileh.closed
+            and self.fileh.writable()
+        ):
             self.fileh.flush()
             os.fsync(self.fileh.fileno())
 
@@ -932,8 +936,7 @@ class PathStorage(OutputBase):
         Args:
             step: The current simulation step.
             data: A dictionary containing the path and the directory to
-                write to.
-
+                write to, in addition to path status.
         Returns:
             A copy of the path (moved to the new directory).
         """
@@ -942,6 +945,7 @@ class PathStorage(OutputBase):
         # home_dir = path_ensemble.directory['home_dir'] + '/trajs'
         path = data["path"]
         home_dir = data["dir"]
+        status = data["status"]
         # This is the path on form: /path/to/000/traj/11
         archive_path = os.path.join(
             home_dir,
@@ -950,7 +954,21 @@ class PathStorage(OutputBase):
 
         # To organize things we create a subfolder for storing the
         # files. This is on form: /path/to/000/traj/11/traj
-        traj_dir = os.path.join(archive_path, "accepted")
+        if status == "ACC":
+            traj_dir = os.path.join(archive_path, "accepted")
+        else:
+            # save.txt files and .traj files in same rejected subfolder with
+            # structure /load_dir/<path_number>/rejected/<rej_cnt>. We store at
+            # most 1000 rejected paths per parent path, else there is probably
+            # something wrong, and all get put in rejected/999
+            for rej_cnt in range(1000):
+                tmp_archive_path = os.path.join(
+                    archive_path, "rejected", str(rej_cnt)
+                )
+                if not os.path.exists(tmp_archive_path):
+                    break
+            archive_path = tmp_archive_path
+            traj_dir = archive_path
         from infretis.tools.performance_profiler import global_profiler
         # Create the needed directories:
         with global_profiler.profile_operation("pstore:makedirs"):

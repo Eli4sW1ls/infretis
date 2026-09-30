@@ -26,7 +26,7 @@ class TestREPEXStateStaple:
             },
             "runner": {"workers": 1},
             "simulation": {
-                "seed": 42,
+                "seed": 42, "zeroswap": 0.5, "pick_scheme": 0,
                 "interfaces": [0.1, 0.3, 0.5],
                 "shooting_moves": ["st_sh", "st_sh", "st_sh"],
                 "mode": "staple",
@@ -357,7 +357,7 @@ class TestREPEXStateStapleTreatOutput:
             },
             "runner": {"workers": 1},
             "simulation": {
-                "seed": 42,
+                "seed": 42, "zeroswap": 0.5, "pick_scheme": 0,
                 "interfaces": [0.1, 0.3, 0.5],
                 "shooting_moves": ["st_sh", "st_sh", "st_sh"],
                 "mode": "staple",
@@ -582,7 +582,7 @@ class TestStapleEnsembleValidation:
             },
             "runner": {"workers": 1},
             "simulation": {
-                "seed": 42,
+                "seed": 42, "zeroswap": 0.5, "pick_scheme": 0,
                 "interfaces": [0.1, 0.3, 0.5],
                 "shooting_moves": ["st_sh", "st_sh", "st_sh"],
                 "mode": "staple",
@@ -668,7 +668,7 @@ class TestStapleStateManagement:
             },
             "runner": {"workers": 1},
             "simulation": {
-                "seed": 42,
+                "seed": 42, "zeroswap": 0.5, "pick_scheme": 0,
                 "interfaces": [0.1, 0.3, 0.5],
                 "shooting_moves": ["st_sh", "st_sh", "st_sh"],
                 "mode": "staple",
@@ -792,7 +792,7 @@ class TestStapleMockEnhancement:
                 "max_time": 3600.0
             },
             "simulation": {
-                "seed": 12345,
+                "seed": 12345, "zeroswap": 0.5, "pick_scheme": 0,
                 "interfaces": [0.05, 0.15, 0.25, 0.35, 0.45],
                 "shooting_moves": ["st_sh", "st_sh", "st_sh", "st_sh", "st_sh"],
                 "mode": "staple",
@@ -896,7 +896,7 @@ class TestStapleConfigurationValidation:
         base_config = {
             "current": {"size": 3, "cstep": 0, "active": [0, 1, 2], "locked": [], "traj_num": 3, "frac": {}},
             "runner": {"workers": 1},
-            "simulation": {"seed": 42, "interfaces": [0.1, 0.3, 0.5], "mode": "staple", "steps": 100},
+            "simulation": {"seed": 42, "zeroswap": 0.5, "pick_scheme": 0, "interfaces": [0.1, 0.3, 0.5], "mode": "staple", "steps": 100},
             "output": {"data_dir": ".", "pattern": False}
         }
         
@@ -917,7 +917,7 @@ class TestStapleConfigurationValidation:
         base_config = {
             "current": {"size": 3, "cstep": 0, "active": [0, 1, 2], "locked": [], "traj_num": 3, "frac": {}},
             "runner": {"workers": 1},
-            "simulation": {"seed": 42, "shooting_moves": ["st_sh", "st_sh", "st_sh"], "mode": "staple", "steps": 100},
+            "simulation": {"seed": 42, "zeroswap": 0.5, "pick_scheme": 0, "shooting_moves": ["st_sh", "st_sh", "st_sh"], "mode": "staple", "steps": 100},
             "output": {"data_dir": ".", "pattern": False}
         }
         
@@ -946,7 +946,7 @@ class TestStapleConfigurationValidation:
         base_config = {
             "current": {"cstep": 0, "active": [], "locked": [], "traj_num": 3, "frac": {}},
             "runner": {"workers": 1},
-            "simulation": {"seed": 42, "interfaces": [0.1, 0.3, 0.5], "mode": "staple", "steps": 100},
+            "simulation": {"seed": 42, "zeroswap": 0.5, "pick_scheme": 0, "interfaces": [0.1, 0.3, 0.5], "mode": "staple", "steps": 100},
             "output": {"data_dir": ".", "pattern": False}
         }
         
@@ -967,7 +967,7 @@ class TestStapleConfigurationValidation:
         """Test worker configuration validation."""
         base_config = {
             "current": {"size": 3, "cstep": 0, "active": [0, 1, 2], "locked": [], "traj_num": 3, "frac": {}},
-            "simulation": {"seed": 42, "interfaces": [0.1, 0.3, 0.5], "shooting_moves": ["st_sh", "st_sh", "st_sh"], "mode": "staple", "steps": 100},
+            "simulation": {"seed": 42, "zeroswap": 0.5, "pick_scheme": 0, "interfaces": [0.1, 0.3, 0.5], "shooting_moves": ["st_sh", "st_sh", "st_sh"], "mode": "staple", "steps": 100},
             "output": {"data_dir": ".", "pattern": False}
         }
         
@@ -1002,7 +1002,7 @@ class TestStapleIntegrationWorkflow:
             },
             "runner": {"workers": 1},
             "simulation": {
-                "seed": 42,
+                "seed": 42, "zeroswap": 0.5, "pick_scheme": 0,
                 "interfaces": [0.1, 0.3, 0.5],
                 "shooting_moves": ["st_sh", "st_sh", "st_sh"],
                 "mode": "staple",
@@ -1064,7 +1064,7 @@ class TestStapleIntegrationWorkflow:
         config = {
             "current": {"size": 2, "cstep": 0, "active": [0, 1], "locked": [], "traj_num": 3, "frac": {}},
             "runner": {"workers": 1},
-            "simulation": {"seed": 42, "interfaces": [0.2, 0.4], "shooting_moves": ["st_sh", "st_sh"], "mode": "staple", "steps": 100},
+            "simulation": {"seed": 42, "zeroswap": 0.5, "pick_scheme": 0, "interfaces": [0.2, 0.4], "shooting_moves": ["st_sh", "st_sh"], "mode": "staple", "steps": 100},
             "output": {"data_dir": ".", "pattern": False}
         }
         

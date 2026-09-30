@@ -721,10 +721,11 @@ class TestPastePaths:
         path_back = self.create_test_path(back_orders)
         path_forw = self.create_test_path(forw_orders)
         
-        # Limit combined path to 7 points
+        # maxlen is set on the new path, but pasting no longer truncates;
+        # the maxlen is enforced during propagation instead
         combined = paste_paths(path_back, path_forw, overlap=1, maxlen=7)
         
-        assert combined.length <= 7
+        assert combined.length == 9
         assert combined.maxlen == 7
 
     def test_paste_paths_time_origin(self):
@@ -935,7 +936,7 @@ class TestStapleConfigurationValidation:
                 },
                 "runner": {"workers": 1},
                 "simulation": {
-                    "seed": 42,
+                    "seed": 42, "zeroswap": 0.5, "pick_scheme": 0,
                     "interfaces": [0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6],
                     "shooting_moves": ["sh", "sh", "sh"],
                     "mode": "staple",
@@ -966,7 +967,7 @@ class TestStapleConfigurationValidation:
                 },
                 "runner": {"workers": 1},
                 "simulation": {
-                    "seed": 42,
+                    "seed": 42, "zeroswap": 0.5, "pick_scheme": 0,
                     "interfaces": [0.1, 0.3, 0.5],
                     # Missing all_intfs
                     "shooting_moves": ["st_sh", "st_sh", "st_sh"],
@@ -1064,14 +1065,14 @@ class TestStapleEdgeCases:
         # Should be at capacity
         assert boundary_path.length == maxlen
         
-        # Try to add one more (should fail)
+        # Append no longer enforces maxlen (propagation does), so one more
+        # point is still added
         extra_system = System()
         extra_system.order = [0.7]
         extra_system.config = ("extra.xyz", maxlen)
         
-        added = boundary_path.append(extra_system)
-        assert not added  # Should fail to add
-        assert boundary_path.length == maxlen  # Length unchanged
+        boundary_path.append(extra_system)
+        assert boundary_path.length == maxlen + 1
 
 
 class TestStapleTurnDetectionEdgeCases:

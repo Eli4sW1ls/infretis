@@ -17,7 +17,7 @@ def repex_state():
     config = {
         'current': {'size': 5, 'cstep': 0},
         'simulation': {
-            'seed': 42,
+            'seed': 42, 'zeroswap': 0.5, 'pick_scheme': 0,
             'shooting_moves': ['sh'] * 6,
             'interfaces': [0, 1, 2, 3, 4, 5],
             'steps': 100

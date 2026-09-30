@@ -610,7 +610,7 @@ class AMSEngine(EngineBase):  # , metaclass=Singleton):
             }
 
             phase_point = self.snapshot_to_system(system, snapshot)
-            status, success, stop, _ = self.add_to_path(
+            status, success, stop = self.add_to_path(
                 path, phase_point, left, right, ens_set.get("all_intfs", None)
             )
 
@@ -623,7 +623,7 @@ class AMSEngine(EngineBase):  # , metaclass=Singleton):
                 )
             )
             tot_enes.append(kin_enes[-1] + pot_enes[-1])
-            temps.append(self.states[traj_file][i].get_temperate())
+            temps.append(self.states[traj_file][i].get_temperature())
 
             logger.info("OP: %f in frame %s %i", order[0], traj_file, i)
 
