@@ -343,6 +343,10 @@ def select_shoot(
                 accept, new_paths, status = staple_swap_zero(picked, engines)
             else:
                 accept, new_paths, status = retis_swap_zero(picked, engines)
+        elif next(iter(picked.values()))["ens"]["tis_set"].get(
+            "staple", False
+        ):
+            accept, new_paths, status = staple_swap(picked, engines)
         else:
             # logger.info(f"Shooting sh sh in ensembles: {ens_nums[0]} <-> {ens_nums[1]}"\
             #             f" with paths: {pnums} and worker: {md_items['pin']}")
@@ -2286,6 +2290,236 @@ def staple_swap_zero(
             compute_weight(path, intf_w[i], move) if move in ("wf") else 1
         )
     return accept, [path0, path1], status
+
+
+def staple_pptype_weight(
+    pptype: str, ens_idx: int, n_interfaces: int
+) -> float:
+    """Return the weight of a staple path in a single ensemble.
+
+    This is the weight that `calc_cv_vector` puts in the `W` matrix for a
+    `StaplePath`, but for one ensemble at a time and starting from an
+    already determined partial path type. It is used by
+    :py:func:`staple_swap` to build its acceptance rule.
+
+    Args:
+        pptype: The three character partial path type ("LMR", "LML", ...)
+            of the path in the ensemble, as returned by
+            `StaplePath.get_pptype`, or "***" if the path is not a valid
+            path of the ensemble.
+        ens_idx: The number of the ensemble as used in `picked`, i.e.
+            `[0^-]` is -1 and `[0^+]` is 0.
+        n_interfaces: The number of interfaces in the simulation.
+
+    Returns:
+        The weight of the path in the given ensemble, zero if the path
+        does not belong to the ensemble.
+    """
+    if pptype == "***":
+        return 0.0
+    # Special-case: for LML paths in ensemble index 1 (i.e. the second
+    # ensemble) the CV is fully assigned (1.0) instead of the usual 0.5
+    # used for internal LML/RMR segments.
+    if pptype in ("LML", "RMR") and 0 < ens_idx <= n_interfaces - 2:
+        if ens_idx == 1 and pptype == "LML":
+            return 1.0
+        return 0.5
+    return 1.0
+
+
+def staple_swap(
+    picked: Dict[int, Any],
+    engines: Dict[int, List[EngineBase]],
+) -> Tuple[bool, List[InfPath], str]:
+    """Swap the paths of two neighbouring StapleTIS ensembles.
+
+    This is the StapleTIS counterpart of :py:func:`ppretis_swap`: the
+    "regular", nearest neighbour swap that can be used instead of the
+    infinite swap (permanent) machinery of
+    :py:class:`.REPEX_state_staple`.
+
+    Contrary to PPTIS, a staple path is not truncated at the interfaces
+    of the ensemble that generated it: it is extended in both directions
+    until a turn is found. The very same trajectory can therefore also be
+    a valid path of a neighbouring ensemble, which is exactly what the
+    infinite swap exploits. A nearest neighbour swap is then a plain
+    exchange of the two trajectories and needs no extra MD; only the
+    ensemble bookkeeping of the paths (their partial path type and their
+    shooting region) is redone with `StaplePath.get_pptype` and
+    `StaplePath.get_sh_region`.
+
+    The exchange of the paths `X_i` and `X_j` of the ensembles `i` and
+    `j` is accepted with the usual replica exchange probability::
+
+        P_acc = min(1, w_i(X_j) * w_j(X_i) / (w_i(X_i) * w_j(X_j)))
+
+    where `w_e(X)` is the weight of path `X` in ensemble `e`, i.e. the
+    same weight that `calc_cv_vector` puts in the `W` matrix. When one of
+    the paths is not a valid path of the ensemble it would move into, its
+    weight is zero and the swap is rejected with the status "NCR".
+
+    Args:
+        picked: A dictionary mapping the two neighbouring ensemble
+            numbers to their settings and their current path. The keys
+            are the ensemble numbers as used in the `W` matrix, so
+            `[0^+]` is 0, and they must be given in ascending order.
+            `[0^-]` (-1) is not handled here, that pair is swapped by
+            :py:func:`staple_swap_zero`.
+        engines: The engines of the two ensembles. They are unused, as
+            the swap requires no propagation, but they are kept in the
+            signature so that all swapping moves can be called the same
+            way.
+
+    Returns:
+        A tuple containing:
+            - True if the swap is accepted, False otherwise.
+            - The paths for the two ensembles, in the order of
+              `picked.keys()`.
+            - A string representing the status of the move.
+    """
+    ens_keys = list(picked.keys())
+    assert len(ens_keys) == 2, "staple_swap needs exactly two ensembles"
+    assert ens_keys[0] < ens_keys[1], (
+        f"staple_swap expects ascending ensemble numbers, got {ens_keys}"
+    )
+    ens_num0, ens_num1 = ens_keys
+    ens_set0 = picked[ens_num0]["ens"]
+    ens_set1 = picked[ens_num1]["ens"]
+    old_path0 = picked[ens_num0]["traj"]
+    old_path1 = picked[ens_num1]["traj"]
+    rgen = ens_set0["rgen"]
+    interfaces = list(ens_set0["all_intfs"])
+    n_interfaces = len(interfaces)
+
+    logger.info(
+        "Swapping (staple): %s <-> %s",
+        ens_set0["ens_name"],
+        ens_set1["ens_name"],
+    )
+
+    if not (
+        isinstance(old_path0, StaplePath) and isinstance(old_path1, StaplePath)
+    ):
+        logger.warning("Staple swap needs staple paths, rejecting the move.")
+        return False, [old_path0, old_path1], "NCR"
+
+    # The trial paths are the partner's trajectory, unchanged. Only their
+    # ensemble bookkeeping has to be redone below.
+    trial0 = old_path1.copy()
+    trial1 = old_path0.copy()
+
+    new_types = []
+    new_regions = []
+    for path, ens_set in ((trial0, ens_set0), (trial1, ens_set1)):
+        pp_intfs = list(ens_set["interfaces"])
+        try:
+            pptype = path.get_pptype(interfaces, pp_intfs)
+            region = (
+                path.get_sh_region(interfaces, pp_intfs)
+                if pptype != "***"
+                else None
+            )
+        except (
+            AssertionError,
+            IndexError,
+            KeyError,
+            StopIteration,
+            ValueError,
+        ) as err:
+            logger.info(
+                "Path %s does not fit in %s: %s",
+                path.path_number,
+                ens_set["ens_name"],
+                err,
+            )
+            pptype, region = "***", None
+        # Same requirements as `StaplePath.get_shooting_point`, a path
+        # without a usable shooting region cannot be sampled further.
+        if region is not None and (
+            len(region) != 2
+            or region[0] > region[1]
+            or region[0] <= 0
+            or region[1] >= path.length - 1
+        ):
+            region = None
+        if region is None:
+            pptype = "***"
+        new_types.append(pptype)
+        new_regions.append(region)
+
+    w0_new = staple_pptype_weight(new_types[0], ens_num0, n_interfaces)
+    w1_new = staple_pptype_weight(new_types[1], ens_num1, n_interfaces)
+
+    if w0_new == 0.0 or w1_new == 0.0:
+        logger.info(
+            "Staple swap rejected (NCR): path %s is %s in %s,"
+            " path %s is %s in %s.",
+            old_path1.path_number,
+            new_types[0],
+            ens_set0["ens_name"],
+            old_path0.path_number,
+            new_types[1],
+            ens_set1["ens_name"],
+        )
+        return False, [old_path0, old_path1], "NCR"
+
+    # `get_pptype` returns the type stored on the path when it was
+    # generated for that very ensemble, so these are the old weights.
+    w0_old = staple_pptype_weight(
+        old_path0.get_pptype(interfaces, list(ens_set0["interfaces"])),
+        ens_num0,
+        n_interfaces,
+    )
+    w1_old = staple_pptype_weight(
+        old_path1.get_pptype(interfaces, list(ens_set1["interfaces"])),
+        ens_num1,
+        n_interfaces,
+    )
+
+    if w0_old == 0.0 or w1_old == 0.0:
+        logger.warning(
+            "div_by_zero in staple swap. w0_old, w1_old: [%f,%f]",
+            w0_old,
+            w1_old,
+        )
+        p_swap_acc = 1.0
+    else:
+        p_swap_acc = (w0_new * w1_new) / (w0_old * w1_old)
+
+    if rgen.random() >= p_swap_acc:
+        logger.info("Staple swap rejected (HAS), p_acc was %f", p_swap_acc)
+        return False, [old_path0, old_path1], "HAS"
+
+    for path, ens_num, pptype, region, source in (
+        (trial0, ens_num0, new_types[0], new_regions[0], old_path1),
+        (trial1, ens_num1, new_types[1], new_regions[1], old_path0),
+    ):
+        # The phase points are untouched, so the shooting regions that
+        # were already determined for the other ensembles stay valid.
+        path.sh_region[ens_num] = region
+        path.pptype = (ens_num, pptype)
+        path.weight = getattr(source, "weight", 1.0)
+        path.status = "ACC"
+        path.generated = (
+            "st_swap",
+            path.phasepoints[region[0]].order[0],
+            region[0],
+            path.length,
+            (ens_num, pptype),
+            path.sh_region,
+        )
+
+    logger.info(
+        "Staple swap accepted: path %s -> %s (%s), path %s -> %s (%s)",
+        old_path1.path_number,
+        ens_set0["ens_name"],
+        new_types[0],
+        old_path0.path_number,
+        ens_set1["ens_name"],
+        new_types[1],
+    )
+    return True, [trial0, trial1], "ACC"
+
 
 def staple_extender(
     source_seg: InfPath,

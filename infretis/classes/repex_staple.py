@@ -66,6 +66,17 @@ class REPEX_state_staple(REPEX_state):
             # fall back to empty set on bad config
             self.staple_infinite_swap_exclude = set()
 
+        # Fraction of the picks that attempt a PPTIS-like nearest neighbour
+        # swap between two TIS ensembles instead of a shooting move. This is
+        # only used when infinite swap is disabled; with infinite swap on,
+        # the permanent calculation already exchanges paths. Set
+        # "staple_swap_frac": 0.0 in the simulation config to only shoot.
+        self.staple_swap_frac = float(
+            config.get("simulation", {}).get(
+                "staple_swap_frac", self.zeroswap
+            )
+        )
+
     @property
     def prob(self):
         """Calculate the P matrix for STAPLE.
@@ -293,6 +304,88 @@ class REPEX_state_staple(REPEX_state):
         else:
             # Use full infinite swap behavior from base class
             super().add_traj(ens, traj, valid, count, n)
+
+    def pick(self):
+        """Pick path and ens.
+
+        With infinite swap enabled the base REPEX behaviour is kept: the
+        permanent already exchanges paths over all ensembles, so only the
+        `[0^-] <-> [0^+]` swap is proposed on top of it.
+
+        With infinite swap disabled the P matrix is the identity, so every
+        path stays in its own ensemble and paths would never be exchanged
+        at all. To still sample exchanges, a fraction `staple_swap_frac`
+        of the picks proposes a PPTIS-like swap with a randomly chosen
+        neighbouring ensemble, which is carried out by
+        `infretis.core.tis.staple_swap`.
+        """
+        if self.staple_infinite_swap:
+            return super().pick()
+
+        prob = self.prob.astype("float64").flatten()
+        p = self.rgen.choice(self.n**2, p=np.nan_to_num(prob / np.sum(prob)))
+        traj, ens = np.divmod(p, self.n)
+        self.swap(traj, ens)
+        self.lock(ens)
+        traj = self._trajs[ens]
+
+        ens_nums = (ens - self._offset,)
+        inp_trajs = (traj,)
+
+        if (
+            (ens == self._offset and not self._locks[self._offset - 1])
+            or (ens == self._offset - 1 and not self._locks[self._offset])
+        ) and self.rgen.random() < self.zeroswap:
+            # `[0^-] <-> [0^+]` swap, exactly as in the base REPEX class.
+            if ens == self._offset:
+                # ens = 0
+                other = self._offset - 1
+                other_traj = self.pick_traj_ens(other)
+                ens_nums = (-1, 0)
+                inp_trajs = (other_traj, traj)
+            else:
+                # ens = -1
+                other = self._offset
+                other_traj = self.pick_traj_ens(other)
+                ens_nums = (-1, 0)
+                inp_trajs = (traj, other_traj)
+        elif ens >= self._offset and self.rgen.random() < self.staple_swap_frac:
+            # Nearest neighbour swap between two TIS ensembles. The
+            # direction is drawn symmetrically and nothing is swapped when
+            # it points outside of the ensemble range, so that both
+            # ensembles of a pair propose the pair equally often.
+            neighb = int(ens) + int(self.rgen.choice([-1, 1]))
+            if self._offset <= neighb <= self.n - 2 and not self._locks[neighb]:
+                other_traj = self.pick_traj_ens(neighb)
+                pair = sorted(
+                    ((int(ens), traj), (neighb, other_traj)),
+                    key=lambda item: item[0],
+                )
+                ens_nums = tuple(e - self._offset for e, _ in pair)
+                inp_trajs = tuple(t for _, t in pair)
+                logger.info(
+                    "Proposing staple swap between %s and %s",
+                    ens_nums[0] + 1,
+                    ens_nums[1] + 1,
+                )
+
+        # lock and print the picked traj and ens
+        pat_nums = [str(i.path_number) for i in inp_trajs]
+        self.locked.append((list(ens_nums), pat_nums))
+        if self.printing():
+            self.print_pick(ens_nums, pat_nums, self.cworker)
+        picked = {}
+
+        child_rng = spawn_rng(self.rgen)
+        for ens_num, inp_traj in zip(ens_nums, inp_trajs):
+            ens_pick = self.ensembles[ens_num + 1]
+            ens_pick["rgen"] = spawn_rng(child_rng)
+            picked[ens_num] = {
+                "ens": ens_pick,
+                "traj": inp_traj,
+                "pn_old": inp_traj.path_number,
+            }
+        return picked
 
     @profiled
     def permanent_prob(self, arr):
