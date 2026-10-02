@@ -24,6 +24,19 @@ import threading
 from infretis.classes.staple_path import *
 from infretis.classes.system import System
 
+# profiling (tracemalloc + psutil on every call) is opt-in, switched on with
+# the env var INFRETIS_PROFILE=true or internalrun(..., enable_profiling=True).
+# The env var also carries the choice to the spawned worker processes.
+_PROFILE_ENV = "INFRETIS_PROFILE"
+PROFILING_ENABLED = os.environ.get(_PROFILE_ENV, "false").lower() == "true"
+
+
+def set_profiling(enabled: bool) -> None:
+    """Switch profiling on/off here and in workers spawned afterwards."""
+    global PROFILING_ENABLED
+    PROFILING_ENABLED = enabled
+    os.environ[_PROFILE_ENV] = "true" if enabled else "false"
+
 # Fallback utility functions if staple_path_utils not available
 def create_staple_path_with_turn(interfaces, turn_at_interface_pair=None, start_region="A", extra_length=5):
     """Create a correct staple path with turn."""
@@ -92,7 +105,14 @@ class StaplePerformanceProfiler:
     
     @contextmanager
     def profile_operation(self, operation_name: str, path_length: int = 0, **kwargs):
-        """Context manager to profile a staple operation."""
+        """Context manager to profile a staple operation.
+
+        Does nothing unless profiling is enabled (see set_profiling).
+        """
+        if not PROFILING_ENABLED:
+            yield
+            return
+
         # Start memory tracking
         tracemalloc.start()
         

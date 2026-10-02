@@ -6,7 +6,11 @@ import os
 
 from infretis.scheduler import scheduler
 from infretis.setup import setup_config
-from infretis.tools.performance_profiler import global_profiler, start_periodic_reports
+from infretis.tools.performance_profiler import (
+    global_profiler,
+    set_profiling,
+    start_periodic_reports,
+)
 
 def enable_debugging(port=56784):
     """Enable remote debugging for external tools like infinit."""
@@ -46,6 +50,12 @@ def internalrun(input_file, enable_profiling=False):
         print("🐛 Debug mode enabled - breakpoints should work now!")
     
     # Note: Comprehensive profiling available in profiling.py module
+    # enabled by the argument or by INFRETIS_PROFILE=true
+    enable_profiling = (
+        enable_profiling
+        or os.environ.get("INFRETIS_PROFILE", "false").lower() == "true"
+    )
+    set_profiling(enable_profiling)
     if enable_profiling:
         print("📊 Basic profiling requested - use profiling.py module for detailed analysis")
         # start background reporting every five minutes
