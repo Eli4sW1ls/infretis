@@ -46,6 +46,13 @@ class REPEX_state_staple(REPEX_state):
         # base REPEX_state; kept here so pattern_header() can reference it).
         self.start_time = time.time()
 
+        # Restore the delete_old queue from restart.toml so paths queued
+        # before a restart are still cleaned up afterwards.
+        self.pn_olds = {
+            str(pn): {"adress": list(dic["adress"]), "max_op": list(dic["max_op"])}
+            for pn, dic in config["current"].get("pn_olds", {}).items()
+        }
+
         # Enable visual validation by default (can be disabled in config)
         self.visual_validation = config.get("output", {}).get("visual_validation", False)
         
@@ -1222,6 +1229,48 @@ class REPEX_state_staple(REPEX_state):
             logger.info(f"{key:03.0f} * {values} *")
 
     @profiled
+    def _delete_pn_olds(self):
+        """Delete files of queued old paths, keeping at most n - 1 queued.
+
+        STAPLE-specific safety guard: a path that was displaced from one
+        ensemble may still be the active trajectory in another (due to
+        infinite swaps). Such paths are skipped (not deleted, kept in the
+        queue) instead of blocking the queue, so later paths still get
+        deleted. The queue is stored in restart.toml.
+        """
+        live = set(self.live_paths())
+        load_dir = self.config["simulation"]["load_dir"]
+        for pn_old_del in list(self.pn_olds):
+            if len(self.pn_olds) <= self.n - 1:
+                break
+            if int(pn_old_del) in live:
+                continue
+            del_dic = self.pn_olds.pop(pn_old_del)
+            if self.config["output"]["keep_maxop_trajs"]:
+                path_dir = os.path.join(load_dir, pn_old_del)
+                # delete trajectory files if low orderp (infinit)
+                # and directory is not a symlink
+                if del_dic["max_op"][0] < self.maxop and not os.path.islink(
+                    path_dir
+                ):
+                    for adress in del_dic["adress"]:
+                        if os.path.isfile(adress):
+                            os.remove(adress)
+            else:
+                # delete trajectory files
+                for adress in del_dic["adress"]:
+                    if os.path.isfile(adress):
+                        os.remove(adress)
+            # delete txt files
+            if self.config["output"].get("delete_old_all", False):
+                for txt in ("order.txt", "traj.txt", "energy.txt"):
+                    txt_adress = os.path.join(load_dir, pn_old_del, txt)
+                    if os.path.isfile(txt_adress):
+                        os.remove(txt_adress)
+                os.rmdir(os.path.join(load_dir, pn_old_del, "accepted"))
+                os.rmdir(os.path.join(load_dir, pn_old_del))
+        self.config["current"]["pn_olds"] = self.pn_olds
+
     def treat_output(self, md_items):
         """Treat output."""
         pn_news = []
@@ -1245,7 +1294,8 @@ class REPEX_state_staple(REPEX_state):
                     if str(pn_old) in lock[1]:
                         self.locked.pop(idx)
                 # if path is new: number and save the path:
-                if out_traj.path_number is None or path_status == "ACC":
+                is_new = out_traj.path_number is None or path_status == "ACC"
+                if is_new:
                     # move to accept:
                     if ens_save_idx is None:
                         # fallback to old entry (should exist unless data corrupted)
@@ -1351,54 +1401,19 @@ class REPEX_state_staple(REPEX_state):
                     if self.config["output"]["delete_old"]:
                         for adress in rej_traj.adress:
                             os.remove(adress)
+                # queue the displaced path for deletion (accepted moves only;
+                # after a rejection pn_old is still the active path)
                 if (
-                    self.config["output"].get("delete_old", False)
+                    is_new
+                    and self.config["output"].get("delete_old", False)
                     and pn_old > self.n - 2
                 ):
                     with global_profiler.profile_operation("treat_output:pn_olds_delete"):
-                        if len(self.pn_olds) > self.n - 2:
-                            pn_old_del, del_dic = next(iter(self.pn_olds.items()))
-                            # STAPLE-specific safety guard: a path that was
-                            # displaced from one ensemble may still be the active
-                            # trajectory in another (due to infinite swaps).
-                            # Only delete once the path number is no longer live.
-                            if int(pn_old_del) not in set(self.live_paths()):
-                                load_dir = self.config["simulation"]["load_dir"]
-                                if self.config["output"]["keep_maxop_trajs"]:
-                                    path_dir = os.path.join(load_dir, pn_old_del)
-                                    # delete trajectory files if low orderp (infinit)
-                                    # and directory is not a symlink
-                                    if del_dic["max_op"][
-                                        0
-                                    ] < self.maxop and not os.path.islink(path_dir):
-                                        # update maxop and then delete|
-                                        for adress in del_dic["adress"]:
-                                            os.remove(adress)
-                                else:
-                                    # delete trajectory files
-                                    for adress in del_dic["adress"]:
-                                        os.remove(adress)
-                                # delete txt files
-                                if self.config["output"].get("delete_old_all", False):
-                                    for txt in ("order.txt", "traj.txt", "energy.txt"):
-                                        txt_adress = os.path.join(
-                                            load_dir, pn_old_del, txt
-                                        )
-                                        if os.path.isfile(txt_adress):
-                                            os.remove(txt_adress)
-                                    os.rmdir(
-                                        os.path.join(load_dir, pn_old_del, "accepted")
-                                    )
-                                    os.rmdir(os.path.join(load_dir, pn_old_del))
-                                # pop the deleted path.
-                                self.pn_olds.pop(pn_old_del)
-                        # keep delete list:
-                        if len(self.pn_olds) <= self.n - 2:
-                            self.pn_olds[str(pn_old)] = {
-                                "adress": self.traj_data[pn_old]["adress"],
-                                "max_op": self.traj_data[pn_old]["max_op"],
-                                "min_op": self.traj_data[pn_old]["min_op"],
-                            }
+                        self.pn_olds[str(pn_old)] = {
+                            "adress": list(self.traj_data[pn_old]["adress"]),
+                            "max_op": [float(self.traj_data[pn_old]["max_op"][0])],
+                        }
+                        self._delete_pn_olds()
                 pn_news.append(out_traj.path_number)
                 if self.staple_infinite_swap:
                     # Defer self.prob: batch all state updates and compute
