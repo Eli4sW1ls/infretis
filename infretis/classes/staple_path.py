@@ -811,11 +811,13 @@ def turn_detected(orders: np.ndarray, interfaces: List[float], m_idx: int, lr: i
 
     # Convert to numpy array for vectorized operations
     interfaces_arr = np.array(interfaces)
-    start_op = orders[0]
     end_op = orders[-1]
 
-    # Check if already outside interface boundaries - vectorized comparison
-    if start_op <= interfaces_arr[0] or end_op >= interfaces_arr[-1] or lr * end_op <= lr * interfaces_arr[m_idx]:
+    # Check if the newest point is already outside the interface boundaries.
+    # The first point (the seed copied from the source segment) is not
+    # checked: it may lie in A or B when the source segment is only two
+    # points long, which does not mean a turn has occurred.
+    if end_op <= interfaces_arr[0] or end_op >= interfaces_arr[-1] or lr * end_op <= lr * interfaces_arr[m_idx]:
         return True
     
     # Find extreme value using vectorized operations
