@@ -714,11 +714,15 @@ class REPEX_state_staple(REPEX_state):
         choices = len(arr) // 2
         even = choices * 2 == len(arr)
 
-        # The probability to go right
-        prob_right = np.nan_to_num(np.roll(arr, -1, axis=1) / arr)
+        # Zero weights (path not valid in an ensemble) are expected here;
+        # the resulting nan/inf are handled by nan_to_num, so silence the
+        # divide warnings.
+        with np.errstate(divide="ignore", invalid="ignore"):
+            # The probability to go right
+            prob_right = np.nan_to_num(np.roll(arr, -1, axis=1) / arr)
 
-        # The probability to go left
-        prob_left = np.nan_to_num(np.roll(arr, 1, axis=1) / arr)
+            # The probability to go left
+            prob_left = np.nan_to_num(np.roll(arr, 1, axis=1) / arr)
 
         start = 0
         zero_one = np.array([0, 1])
@@ -1586,7 +1590,10 @@ class REPEX_state_staple(REPEX_state):
                 "must_cross_M": True if i > 0 else False,
                 "start_cond": "R" if not lambda_minus_one and i == 0 else ["L", "R"],
                 "visual_validation": self.visual_validation,  # Pass visual validation setting to each ensemble
-                "repex_state": self,  # Pass reference to repex state for plotting
+                # NOTE: never store `self` here: the ensemble dicts are pickled
+                # to the workers and the returned copies are stored back, so a
+                # reference to the state nests copies of it every cycle (memory
+                # blow-up, OOM).
             }
 
         self.ensembles = pensembles
