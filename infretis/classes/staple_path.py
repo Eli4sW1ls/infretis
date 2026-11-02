@@ -642,8 +642,14 @@ class StaplePath(Path):
         if pp_intfs[0] == pp_intfs[1]:
             return self.phasepoints[0].order[0] <= pp_intfs[1] < self.phasepoints[1].order[0] or \
                    self.phasepoints[-1].order[0] <= pp_intfs[1] < self.phasepoints[-2].order[0]
-        # Check for interface crossing in the segment
-        for p in range(left_border, right_border):
+        # Check for interface crossing in the segment, including the steps
+        # into (left_border-1 -> left_border) and out of it (right_border ->
+        # right_border+1): the middle interface can be crossed on the same
+        # step that leaves the segment, e.g. an RML path of [1+] jumping
+        # from above lambda_1 to below lambda_0 in its last step. get_pptype
+        # counts that crossing, so skipping it here gave such paths a
+        # nonzero weight but the shooting region (0, 0).
+        for p in range(max(left_border - 1, 0), right_border + 1):
             if p >= len(self.phasepoints) - 1:
                 break
             curr_order = self.phasepoints[p].order[0]
