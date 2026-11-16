@@ -955,9 +955,17 @@ class GromacsRunner:
                 logger.debug("Execution of GROMACS stopped")
                 logger.debug("Return code was: %i", poll)
                 if poll != 0:
+                    # a negative return code means GROMACS was killed by a
+                    # signal (e.g. -11 = SIGSEGV, -9 = SIGKILL from the OOM
+                    # killer); stderr then has no GROMACS error message
+                    if poll < 0:
+                        reason = f"killed by signal {signal.Signals(-poll).name}"
+                    else:
+                        reason = f"exit code {poll}"
+                    logger.error("GROMACS execution failed: %s", reason)
                     logger.error("STDOUT, see file: %s", self.stdout_name)
                     logger.error("STDERR, see file: %s", self.stderr_name)
-                    raise RuntimeError("Error in GROMACS execution.")
+                    raise RuntimeError(f"Error in GROMACS execution ({reason}).")
             return poll
         raise RuntimeError("GROMACS is not running.")
 

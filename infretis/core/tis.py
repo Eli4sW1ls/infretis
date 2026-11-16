@@ -146,11 +146,14 @@ def calc_cv_vector(
             pptype_i = path.get_pptype(interfaces, [interfaces[max(0, idx - 1)], interfaces[idx], interfaces[idx + 1]])
             if pptype_i != "***":
                 # print(f"pptype: {path.get_pptype(interfaces, [interfaces[max(0, idx - 1)], interfaces[idx], interfaces[idx + 1]])} in {idx}, {path.ordermax}, {path.ordermin}")
-                # Special-case: for LML paths in ensemble index 1 (i.e. the
-                # second ensemble) we treat the CV as fully assigned (1.0)
-                # instead of the usual 0.5 used for internal LML/RMR segments.
+                # The 0.5 for internal LML/RMR segments is the coin flip in
+                # `staple_extender`, which picks one of two distinct staples.
+                # LML in ensemble index 1 and RMR in the last ensemble end in
+                # A or B, both choices give the same path, so they weigh 1.0.
                 if (pptype_i in ["LML", "RMR"] and 0 < idx <= len(interfaces)-2):
-                    if idx == 1 and pptype_i == "LML":
+                    if (idx == 1 and pptype_i == "LML") or (
+                        idx == len(interfaces) - 2 and pptype_i == "RMR"
+                    ):
                         cv.append(1.0)
                     else:
                         cv.append(0.5)
@@ -2339,11 +2342,14 @@ def staple_pptype_weight(
     """
     if pptype == "***":
         return 0.0
-    # Special-case: for LML paths in ensemble index 1 (i.e. the second
-    # ensemble) the CV is fully assigned (1.0) instead of the usual 0.5
-    # used for internal LML/RMR segments.
+    # The 0.5 for internal LML/RMR segments is the coin flip in
+    # `staple_extender`, which picks one of two distinct staples. LML in
+    # ensemble index 1 and RMR in the last ensemble end in A or B, both
+    # choices give the same path, so they weigh 1.0.
     if pptype in ("LML", "RMR") and 0 < ens_idx <= n_interfaces - 2:
-        if ens_idx == 1 and pptype == "LML":
+        if (ens_idx == 1 and pptype == "LML") or (
+            ens_idx == n_interfaces - 2 and pptype == "RMR"
+        ):
             return 1.0
         return 0.5
     return 1.0
@@ -2566,7 +2572,8 @@ def staple_extender(
     if partial_path_type == "LML" or partial_path_type == "RMR":
         # This is a path that starts on the left and ends on the right
         # or vice versa, so we can only extend it in one direction.
-        prop_idx = np.random.choice([0, -1])  # Choose which endpoint to extend from
+        # Choose which endpoint to extend from
+        prop_idx = 0 if ens_set["rgen"].random() < 0.5 else -1
         rev = not prop_idx  # Determine propagation direction (True or False)
         prop_point = source_seg.phasepoints[prop_idx].copy()  # Get the endpoint phasepoint
 
@@ -2611,7 +2618,6 @@ def staple_extender(
                 full_staple.append(phasepoint)
             # print("length after pasting:", full_staple.length, source_seg.length+turn_seg.length - 2)
             full_staple.sh_region[int(ens_set["ens_name"])-1] = (1, source_seg.length - 2)
-            full_staple.weight = 2.0
     else:
         bw_turn = source_seg.empty_path(
             maxlen=ens_set["tis_set"]["maxlength"], pptype="ext"
@@ -2663,7 +2669,6 @@ def staple_extender(
             full_staple.append(phasepoint)
         # print("length after FW pasting:", full_staple.length, source_seg.length+bw_turn.length + fw_turn.length - 4)
         full_staple.sh_region[int(ens_set["ens_name"])-1] = (bw_turn.length - 1, bw_turn.length + source_seg.length - 4)
-        full_staple.weight = 1.0
         
     # Check if the length of the full staple exceeds the maximum allowed length
     if full_staple.length >= ens_set["tis_set"]["maxlength"]:

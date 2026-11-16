@@ -1371,7 +1371,7 @@ class REPEX_state_staple(REPEX_state):
                                     raise ValueError(
                                         f"Ensemble {ens_num} has invalid pptype {pptype}."
                                     )
-                                e_offset = np.random.choice([0, -1])
+                                e_offset = -1 if self.rgen.random() < 0.5 else 0
                                 s_offset = -1 - e_offset
                         
                         # print(f"{out_traj.path_number}, pptype: {pptype}, sh_region: {sh_region}")

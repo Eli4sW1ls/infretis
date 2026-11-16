@@ -176,42 +176,41 @@ class StaplePath(Path):
         if not np.any(crossed_mask):
             return False, None, None
         
-        initial_interface_idx = np.where(crossed_mask)[0]
-        if start_increasing:
-            initial_interface_idx = int(initial_interface_idx[0])
-        else:
-            initial_interface_idx = int(initial_interface_idx[-1])
-        
+        crossed_idx = np.where(crossed_mask)[0]
+        # the interfaces crossed by the first step, nearest to the start first. A step may skip one interface: if
+        # the turn is not completed around the nearest one, the second one is tried (as the extension's
+        # turn_detected does, which tests the recrossing of the second interface below the extremum)
+        candidates = crossed_idx[:2] if start_increasing else crossed_idx[::-1][:2]
+        for skipped, initial_interface_idx in enumerate(candidates):
+            result = self._scan_start_turn(orders, interfaces, int(initial_interface_idx), start_increasing, skipped)
+            if result[0]:
+                return result
+        return False, None, None
+
+    def _scan_start_turn(self, orders, interfaces, initial_interface_idx, start_increasing, skipped=0):
+        """Scan forward for the extremum and the recrossing of interfaces[initial_interface_idx]."""
+        start_op = orders[0]
         initial_interface = interfaces[initial_interface_idx]
-        
-        # Vectorized extremal detection and recrossing check
         max_deviation = start_op
         extremal_idx = 0
-        
         for idx in range(1, len(orders)):
             current_val = orders[idx]
-            
-            # Update extremal
-            if ((start_increasing and current_val > max_deviation) or 
-                (not start_increasing and current_val < max_deviation)):
+            if ((start_increasing and current_val > max_deviation) or
+                    (not start_increasing and current_val < max_deviation)):
                 max_deviation = current_val
                 extremal_idx = idx
-            
-            # Check recrossing
-            recrossed = ((start_increasing and current_val <= initial_interface < max_deviation) or 
-                        (not start_increasing and current_val >= initial_interface > max_deviation))
-            
+            recrossed = ((start_increasing and current_val <= initial_interface < max_deviation) or
+                         (not start_increasing and current_val >= initial_interface > max_deviation))
             if recrossed:
-                # Vectorized interface counting
                 min_val, max_val = min(start_op, max_deviation), max(start_op, max_deviation)
                 interfaces_crossed = np.sum((interfaces >= min_val) & (interfaces < max_val))
-                
-                if interfaces_crossed >= 2:
+                # the skipped interface (between the start and the recrossed one) does not count toward the two
+                # interfaces the turn must cross, so the extremum lies beyond the reported turn interface
+                if interfaces_crossed - skipped >= 2:
                     turn_interface_idx = initial_interface_idx + 1 if start_increasing else initial_interface_idx - 1
                     return True, int(turn_interface_idx), int(extremal_idx)
-        
         return False, None, None
-    
+
     def _check_end_turn(self, orders: np.ndarray, interfaces: np.ndarray) -> Tuple[bool, Optional[int], Optional[int]]:
         """Check if the end of the path forms a valid turn.
         
@@ -257,39 +256,36 @@ class StaplePath(Path):
             return False, None, None
         
         # Find the initial interface that was crossed (similar to start_turn)
-        initial_interface_idx = np.where(crossed_mask)[0]
-        if end_increasing:
-            initial_interface_idx = int(initial_interface_idx[0])  
-        else:
-            initial_interface_idx = int(initial_interface_idx[-1])
-        
-        initial_interface = interfaces[initial_interface_idx]
+        crossed_idx = np.where(crossed_mask)[0]
+        # the interfaces crossed by the last step, nearest to the end first; a step may skip one interface (see
+        # _check_start_turn)
+        candidates = crossed_idx[:2] if end_increasing else crossed_idx[::-1][:2]
+        for skipped, initial_interface_idx in enumerate(candidates):
+            result = self._scan_end_turn(orders, interfaces, int(initial_interface_idx), end_increasing, skipped)
+            if result[0]:
+                return result
+        return False, None, None
 
-        # Similar extremal detection logic but backwards
+    def _scan_end_turn(self, orders, interfaces, initial_interface_idx, end_increasing, skipped=0):
+        """Scan backward for the extremum and the recrossing of interfaces[initial_interface_idx]."""
+        end_op = orders[-1]
+        initial_interface = interfaces[initial_interface_idx]
         max_deviation = end_op
         extremal_idx = len(orders) - 1
-        
-        # Simplified backwards scan - could be further optimized with vectorization
         for idx in range(len(orders) - 2, -1, -1):
             current_val = orders[idx]
-
-            if ((end_increasing and current_val > max_deviation) or 
-                (not end_increasing and current_val < max_deviation)):
+            if ((end_increasing and current_val > max_deviation) or
+                    (not end_increasing and current_val < max_deviation)):
                 max_deviation = current_val
                 extremal_idx = idx
-
-            # Check recrossing
-            recrossed = ((end_increasing and current_val <= initial_interface < max_deviation) or 
-                          (not end_increasing and current_val >= initial_interface > max_deviation))
+            recrossed = ((end_increasing and current_val <= initial_interface < max_deviation) or
+                         (not end_increasing and current_val >= initial_interface > max_deviation))
             if recrossed:
-            # Vectorized interface counting
                 min_val, max_val = min(end_op, max_deviation), max(end_op, max_deviation)
                 interfaces_crossed = np.sum((interfaces >= min_val) & (interfaces < max_val))
-                
-                if interfaces_crossed >= 2:
+                if interfaces_crossed - skipped >= 2:            # see _scan_start_turn
                     turn_interface_idx = initial_interface_idx + 1 if end_increasing else initial_interface_idx - 1
                     return True, int(turn_interface_idx), int(extremal_idx)
-        
         return False, None, None
 
     def get_shooting_point(self, rgen) -> Tuple[System, int]:
