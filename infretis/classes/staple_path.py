@@ -602,6 +602,10 @@ class StaplePath(Path):
                     break
             if not vis:
                 logger.warning("No valid segment found in path with orders %s and pp_intfs %s. Returning full path: %s %s", orders, pp_intfs, poss_indices, valid_idx_list)
+                # No frames next to a crossing of the middle interface (e.g.
+                # the path jumps over the window in one step): there is no
+                # shooting region, `valid_indices` was never assigned.
+                raise ValueError("No valid segment found")
             if len(poss_indices) == 0:
                 raise ValueError("No valid segment found")
             left_border = valid_indices[0]
