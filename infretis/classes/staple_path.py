@@ -532,7 +532,7 @@ class StaplePath(Path):
                         return (0, 1)
                     if pt == "RML" and ens == 0:
                         return (1, 0)
-                    raise ValueError("Invalid pptype for resolving degenerate [0*] segment: %s" % self.pptype)
+                    raise ValueError("Invalid pptype for resolving degenerate [0*] segment: %s" % (self.pptype,))
 
                 start_state, end_state = _pptype_to_states(stored_pt, stored_ens)
 
