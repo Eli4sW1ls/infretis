@@ -1834,9 +1834,34 @@ def staple_sh(
         except ValueError as e:
             logger.error("Error preparing shooting point: %s", e)
             ppath = path.get_pp_path(ens_set["all_intfs"], intfs_pp)
-            shooting_point, idx, dek = prepare_shooting_point(
-                ppath, ens_set["rgen"], engine, ens_set
-            )
+            try:
+                if ppath is None:
+                    raise ValueError("get_pp_path found no valid path")
+                shooting_point, idx, dek = prepare_shooting_point(
+                    ppath, ens_set["rgen"], engine, ens_set
+                )
+            except ValueError as e2:
+                # The path has no frame to shoot from in this ensemble (empty
+                # shooting region, also in its cut path), so no shooting move
+                # can be proposed. Staying in the old path is a valid move
+                # (the sampled distribution is untouched): reject it ("NSG",
+                # as for a wire fencing move without frames) instead of
+                # letting the worker die and stop the run.
+                logger.warning(
+                    "staple_sh: no usable shooting point in ensemble %s for "
+                    "path %s (%s); move rejected with status NSG",
+                    ens_set.get("ens_name"),
+                    getattr(path, "path_number", None),
+                    e2,
+                )
+                # a trial path must hold a frame (run_md reads its order
+                # extrema), as after a failed kick:
+                frame = path.phasepoints[0].copy()
+                trial_path.append(frame)
+                trial_path.generated = ("st_sh", frame.order[0], 0, 0)
+                trial_path.time_origin = path.time_origin
+                trial_path.status = "NSG"
+                return False, trial_path, "NSG"
         # concise debug: ensemble id, path number, selected order, sh_region, dek
         try:
             pn = path.path_number
