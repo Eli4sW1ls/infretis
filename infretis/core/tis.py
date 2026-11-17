@@ -1781,6 +1781,31 @@ def ppretis_swap(
     return accept, (path0, path1), status
 
 
+def _staple_sh_no_region(
+    ens_set: Dict[str, Any], path: InfPath, err: Exception
+) -> Tuple[bool, InfPath, str]:
+    """Reject a staple shooting move on a path without shooting region.
+
+    Staying in the old path is a valid move: the sampled distribution is
+    untouched, such a path only gets into the ensemble through a swap.
+    """
+    logger.warning(
+        "staple_sh: no shooting region in ensemble %s for path %s (%s); "
+        "move rejected with status NSG",
+        ens_set.get("ens_name"),
+        getattr(path, "path_number", None),
+        err,
+    )
+    trial_path = path.empty_path(maxlen=ens_set["tis_set"]["maxlength"])
+    # a trial path must hold a frame (run_md reads its order extrema):
+    frame = path.phasepoints[0].copy()
+    trial_path.append(frame)
+    trial_path.generated = ("st_sh", frame.order[0], 0, 0)
+    trial_path.time_origin = path.time_origin
+    trial_path.status = "NSG"
+    return False, trial_path, "NSG"
+
+
 def staple_sh(
     ens_set: Dict[str, Any],
     path: InfPath,
@@ -1812,7 +1837,12 @@ def staple_sh(
     intfs_pp = ens_set["interfaces"]
     sh_region = path.sh_region.get(int(ens_set["ens_name"])-1, None)
     if sh_region is None:
-        sh_region = path.get_sh_region(ens_set["all_intfs"], intfs_pp)
+        try:
+            sh_region = path.get_sh_region(ens_set["all_intfs"], intfs_pp)
+        except ValueError as err:
+            # A path that skips the window of this ensemble (it can still be
+            # here through a swap) has no shooting region.
+            return _staple_sh_no_region(ens_set, path, err)
         path.sh_region[int(ens_set["ens_name"])-1] = sh_region
     else:
         check_region = path.get_sh_region(ens_set["all_intfs"], intfs_pp)
@@ -2467,11 +2497,6 @@ def staple_swap(
         pp_intfs = list(ens_set["interfaces"])
         try:
             pptype = path.get_pptype(interfaces, pp_intfs)
-            region = (
-                path.get_sh_region(interfaces, pp_intfs)
-                if pptype != "***"
-                else None
-            )
         except (
             AssertionError,
             IndexError,
@@ -2485,7 +2510,24 @@ def staple_swap(
                 ens_set["ens_name"],
                 err,
             )
-            pptype, region = "***", None
+            pptype = "***"
+        region = None
+        if pptype != "***":
+            try:
+                region = path.get_sh_region(interfaces, pp_intfs)
+            except (
+                AssertionError,
+                IndexError,
+                KeyError,
+                StopIteration,
+                ValueError,
+            ) as err:
+                logger.info(
+                    "Path %s has no shooting region in %s: %s",
+                    path.path_number,
+                    ens_set["ens_name"],
+                    err,
+                )
         # Same requirements as `StaplePath.get_shooting_point`, a path
         # without a usable shooting region cannot be sampled further.
         if region is not None and (
@@ -2495,8 +2537,10 @@ def staple_swap(
             or region[1] >= path.length - 1
         ):
             region = None
-        if region is None:
-            pptype = "***"
+        # A valid path without a usable shooting region (e.g. it skips the
+        # window of the ensemble in one step) keeps its weight, as in
+        # `calc_cv_vector`: it can not be shot from there (`staple_sh`
+        # rejects that with "NSG"), but it belongs to the ensemble.
         new_types.append(pptype)
         new_regions.append(region)
 
@@ -2549,14 +2593,18 @@ def staple_swap(
     ):
         # The phase points are untouched, so the shooting regions that
         # were already determined for the other ensembles stay valid.
-        path.sh_region[ens_num] = region
+        if region is not None:
+            path.sh_region[ens_num] = region
+        else:
+            path.sh_region.pop(ens_num, None)
         path.pptype = (ens_num, pptype)
         path.weight = getattr(source, "weight", 1.0)
         path.status = "ACC"
+        gen_idx = region[0] if region is not None else 0
         path.generated = (
             "st_swap",
-            path.phasepoints[region[0]].order[0],
-            region[0],
+            path.phasepoints[gen_idx].order[0],
+            gen_idx,
             path.length,
             (ens_num, pptype),
             path.sh_region,
