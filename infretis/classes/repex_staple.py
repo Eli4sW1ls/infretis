@@ -1367,12 +1367,20 @@ class REPEX_state_staple(REPEX_state):
                                     s_offset = 0
                                     e_offset = 1
                             elif ens_num == len(self.ensembles) - 2:
-                                if pptype != "RMR":
-                                    raise ValueError(
-                                        f"Ensemble {ens_num} has invalid pptype {pptype}."
-                                    )
-                                e_offset = -1 if self.rgen.random() < 0.5 else 0
-                                s_offset = -1 - e_offset
+                                # Every path type is accepted in the last ensemble. The stored pptype is the
+                                # label of the shot segment before the extension (staple_sh), so a path whose
+                                # forward part stopped at L and was then extended back into B carries "RML"
+                                # although both of its turns are at B. Weights do not use this label
+                                # (get_pptype per ensemble). Both turns at B: one end (coin flip) turns at the
+                                # first interface above the path's minimum: n - 2 for an RMR path (it stays above
+                                # L), one more back (n - 3) for a path that went below L, such as an "RML" shot
+                                # extended back into B. Both turns at an interior interface: no offsets, as in
+                                # the middle ensembles.
+                                if st[1] == len(self.interfaces) - 1:
+                                    low = int(np.searchsorted(self.interfaces, out_traj.ordermin[0]))
+                                    back = -(len(self.interfaces) - 1 - min(low, len(self.interfaces) - 2))
+                                    e_offset = back if self.rgen.random() < 0.5 else 0
+                                    s_offset = back - e_offset
                         
                         # print(f"{out_traj.path_number}, pptype: {pptype}, sh_region: {sh_region}")
                         self.traj_data[traj_num] = {
