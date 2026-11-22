@@ -81,3 +81,43 @@ def test_staples_built_by_the_extension_are_valid():
             assert StaplePath()._check_end_turn(path, intf)[0]
             n_tested += 1
             break
+
+
+# a steep (learned) order parameter crosses several interfaces in one step: a production path of the staggered
+# channels whose first step crossed four interfaces (cycle 6869; treat_output raised "Path does not have valid
+# turns" and stopped the run). Its start turn lies at lambda_2 (down to the minimum at frame 4, back up past
+# lambda_3 at frame 8) and its end turn at lambda_4 (the maximum at frame 8, back down past lambda_3).
+STEEP_INTF = [-1.6, -1.4741, -1.2245, -1.0638, -0.9991, -0.9245, -0.7248, 0.184, 1.1789, 1.5986, 1.6]
+STEEP = [-0.65971255, -1.09321847, -1.07310752, -1.22541446, -1.35621381, -1.26074359, -1.31393825,
+         -1.15024791, -0.93043589, -1.23742464]
+
+
+def test_turns_with_several_skipped_interfaces():
+    st, end, valid = _path(STEEP).check_turns(STEEP_INTF)
+    assert valid
+    assert st == (True, 2, 4) and end == (True, 4, 8)
+
+
+def test_start_turn_agrees_with_turn_detected_on_random_walks():
+    """For random walks with large steps (several interfaces per step), wherever the extension's turn_detected
+    reports a completed turn, check_turns finds a start turn at the same interface (read backward, the walk is the
+    path start made by a backward extension)."""
+    rng = np.random.default_rng(3)
+    intf = np.linspace(0.0, 1.0, 11)
+    n_checked = 0
+    for _ in range(3000):
+        x = [rng.uniform(0.3, 0.7)]
+        for _ in range(40):
+            x.append(float(np.clip(x[-1] + rng.normal(0, 0.12), 0.01, 0.99)))
+            lr = 1 if x[1] > x[0] else -1
+            # m_idx: the middle interface the extension may not pass; here one the walk never reaches
+            if len(x) >= 3 and turn_detected(np.array(x), list(intf), len(intf) - 1 if lr == -1 else 0, lr):
+                ext = max(x) if lr == 1 else min(x)
+                elig = [k for k, v in enumerate(intf) if (v <= ext if lr == 1 else v >= ext)]
+                elig = [k for k in elig if (intf[k] >= x[0] if lr == 1 else intf[k] <= x[0])]
+                if len(elig) >= 2:                                  # at least two interfaces from the start
+                    ok, k, _ = StaplePath()._check_start_turn(np.array(x), intf)
+                    assert ok and k == (elig[-1] if lr == 1 else elig[0])
+                    n_checked += 1
+                break
+    assert n_checked > 100
