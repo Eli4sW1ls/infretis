@@ -1345,7 +1345,13 @@ class REPEX_state_staple(REPEX_state):
                                 assert out_traj.pptype[0] == ens_num, f"Ensemble number mismatch: expected {ens_num}, got {out_traj.pptype[0]}"
                                 pptype = out_traj.pptype[1]
                             if ens_num not in out_traj.sh_region.keys() or len(out_traj.sh_region[ens_num]) != 2:
-                                sh_region = out_traj.get_sh_region(self.interfaces, self.ensembles[ens_num + 1]['interfaces'])
+                                oriented = out_traj.get_oriented_sh_region(
+                                    list(self.interfaces), list(self.ensembles[ens_num + 1]['interfaces']), self.rgen
+                                )
+                                if oriented is not None:
+                                    sh_region = oriented[0]
+                                else:
+                                    sh_region = out_traj.get_sh_region(self.interfaces, self.ensembles[ens_num + 1]['interfaces'])
                                 out_traj.sh_region[ens_num] = sh_region
                             else:
                                 sh_region = out_traj.sh_region[ens_num]
@@ -1502,6 +1508,13 @@ class REPEX_state_staple(REPEX_state):
                 pptype = paths[i+1].get_pptype(interfaces, self.ensembles[i + 1]['interfaces'])
                 paths[i + 1].pptype = (i, pptype)
                 sh_region = paths[i+1].get_sh_region(interfaces, self.ensembles[i + 1]['interfaces'])
+                # A path crossing the window twice (both ends in A or in B):
+                # the region and pptype follow the path's orientation.
+                oriented = paths[i+1].get_oriented_sh_region(
+                    list(interfaces), list(self.ensembles[i + 1]['interfaces']), self.rgen
+                )
+                if oriented is not None:
+                    sh_region, pptype = oriented
             if i in [0, 1] and st[1] == end[1] == 0:
                 if i == 0:
                     if pptype == "LMR":
@@ -1509,11 +1522,15 @@ class REPEX_state_staple(REPEX_state):
                     elif pptype == "RML":
                         s_offset = 1 
                 elif i == 1:
-                    if pptype != "LML":
-                        raise ValueError(
-                            f"Ensemble {i} has invalid pptype {pptype}."
-                        )
-                    e_offset = 1 
+                    # As in treat_output: every type is accepted; the turn
+                    # above A is at the first interface below the maximum,
+                    # at the start for an RML path.
+                    high = int(np.searchsorted(interfaces, paths[i+1].ordermax[0]))
+                    fwd = max(high - 1, 1)
+                    if pptype == "RML":
+                        s_offset, e_offset = fwd, 0
+                    else:
+                        s_offset, e_offset = 0, fwd
             if not valid:
                 logger.warning("Path does not have valid turns, cannot load staple path.")
                 raise ValueError("Path does not have valid turns.")

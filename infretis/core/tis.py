@@ -1835,25 +1835,39 @@ def staple_sh(
         return shoot(ens_set, path, engine, shooting_point, start_cond)
     
     intfs_pp = ens_set["interfaces"]
-    sh_region = path.sh_region.get(int(ens_set["ens_name"])-1, None)
+    ens_idx = int(ens_set["ens_name"]) - 1
+    sh_region = path.sh_region.get(ens_idx, None)
     if sh_region is None:
-        try:
-            sh_region = path.get_sh_region(ens_set["all_intfs"], intfs_pp)
-        except ValueError as err:
-            # A path that skips the window of this ensemble (it can still be
-            # here through a swap) has no shooting region.
-            return _staple_sh_no_region(ens_set, path, err)
-        path.sh_region[int(ens_set["ens_name"])-1] = sh_region
+        # A path crossing the window twice (both ends in A or in B): the
+        # region follows the path's orientation.
+        sh_region = _staple_oriented_region(
+            path, ens_set["all_intfs"], intfs_pp, ens_set["rgen"], ens_idx
+        )
+        if sh_region is None:
+            try:
+                sh_region = path.get_sh_region(ens_set["all_intfs"], intfs_pp)
+            except ValueError as err:
+                # A path that skips the window of this ensemble (it can still be
+                # here through a swap) has no shooting region.
+                return _staple_sh_no_region(ens_set, path, err)
+        path.sh_region[ens_idx] = sh_region
     else:
-        check_region = path.get_sh_region(ens_set["all_intfs"], intfs_pp)
+        # Undecided orientation is not drawn here (rgen=None): the check
+        # then falls back to `get_sh_region`.
+        oriented = (
+            path.get_oriented_sh_region(list(ens_set["all_intfs"]), list(intfs_pp))
+            if isinstance(path, StaplePath) else None
+        )
+        check_region = (
+            oriented[0] if oriented is not None
+            else path.get_sh_region(ens_set["all_intfs"], intfs_pp)
+        )
         if not (sh_region[0] == check_region[0] and sh_region[1] == check_region[1]):
             # print("check log!")
             logger.warning(f"Stored shooting region does not match calculated one! {sh_region} != {check_region}, {check_region[0]}, {check_region[1]}\
-                intfs: {intfs_pp}, path sh_region: {path.sh_region}, \norders of sh_region: { [p.order[0] for p in path.phasepoints[sh_region[0]:sh_region[1]+1]] } \
+                intfs: {intfs_pp}, path sh_region: {path.sh_region}, orientation: {getattr(path, 'orientation', None)}, \norders of sh_region: { [p.order[0] for p in path.phasepoints[sh_region[0]:sh_region[1]+1]] } \
                     \norders of check_region: { [p.order[0] for p in path.phasepoints[check_region[0]:check_region[1]+1]] }")
-            # A path whose turn ends exactly at the A or B boundary can cross
-            # the window twice; check_turns then picks the other pass. The
-            # stored region is the one the path was generated with: keep it.
+            # The stored region is the one the path was generated with: keep it.
             logger.warning(f"Using the stored shooting region {sh_region} for path {path.path_number}.")
     # the trial path we will generate
     trial_path = path.empty_path(maxlen=ens_set["tis_set"]["maxlength"])
@@ -2514,6 +2528,16 @@ def staple_swap(
             pptype = "***"
         region = None
         if pptype != "***":
+            # A path crossing the window twice (both ends in A or in B):
+            # the region and pptype follow the path's orientation, so they
+            # are the same however the path enters this ensemble.
+            oriented = (
+                path.get_oriented_sh_region(list(interfaces), pp_intfs, rgen)
+                if isinstance(path, StaplePath) else None
+            )
+            if oriented is not None:
+                region, pptype = oriented
+        if pptype != "***" and region is None:
             try:
                 region = path.get_sh_region(interfaces, pp_intfs)
             except (
@@ -2637,6 +2661,67 @@ def staple_swap(
     return True, [trial0, trial1], "ACC"
 
 
+def _set_staple_orientation(
+    full_staple: InfPath,
+    ens_set: Dict[str, Any],
+    partial_path_type: str,
+    rev: Optional[bool],
+) -> None:
+    """Store which end of a new staple is its turn (see `StaplePath.orientation`).
+
+    LML/RMR: the extended end is the turn ("start" when extended backward),
+    so the coin of `staple_extender` also picks the orientation. LMR/RML:
+    the pass that was shot fixes it when the path crosses the window more
+    than once (first pass -> "end", last pass -> "start"); otherwise it is
+    left undecided and drawn when it is first needed.
+    """
+    full_staple.orientation = None
+    if rev is not None:
+        full_staple.orientation = "start" if rev else "end"
+        return
+    ens_idx = int(ens_set["ens_name"]) - 1
+    pp_intfs = list(ens_set["interfaces"])
+    region = full_staple.sh_region.get(ens_idx)
+    if ens_idx <= 0 or region is None or pp_intfs[0] == pp_intfs[1]:
+        return
+    passes = full_staple.get_sh_passes(pp_intfs)
+    if len(passes) < 2:
+        return
+    mid = (region[0] + region[1]) / 2
+    if passes[0][0] <= mid <= passes[0][1]:
+        full_staple.orientation = "end"
+    elif passes[-1][0] <= mid <= passes[-1][1]:
+        full_staple.orientation = "start"
+    else:
+        logger.warning(
+            "Shot region %s matches none of the passes %s in %s.",
+            region, passes, ens_set["ens_name"],
+        )
+
+
+def _staple_oriented_region(
+    path: InfPath,
+    intfs: List[float],
+    pp_intfs: List[float],
+    rgen: Any,
+    ens_idx: int,
+) -> Optional[Tuple[int, int]]:
+    """Return the oriented shooting region of an ambiguous path, else None.
+
+    For a path that crosses the window twice with both ends in A (or B),
+    the region follows `path.orientation` and the matching pptype is stored
+    for `ens_idx`, so the region does not depend on how the path got here.
+    """
+    if not isinstance(path, StaplePath):
+        return None
+    res = path.get_oriented_sh_region(list(intfs), list(pp_intfs), rgen)
+    if res is None:
+        return None
+    region, pptype = res
+    path.pptype = (ens_idx, pptype)
+    return region
+
+
 def staple_extender(
     source_seg: InfPath,
     partial_path_type: Tuple[str, ...],
@@ -2757,7 +2842,9 @@ def staple_extender(
             full_staple.append(phasepoint)
         # print("length after FW pasting:", full_staple.length, source_seg.length+bw_turn.length + fw_turn.length - 4)
         full_staple.sh_region[int(ens_set["ens_name"])-1] = (bw_turn.length - 1, bw_turn.length + source_seg.length - 4)
-        
+
+    _set_staple_orientation(full_staple, ens_set, partial_path_type, rev if partial_path_type in ("LML", "RMR") else None)
+
     # Check if the length of the full staple exceeds the maximum allowed length
     if full_staple.length >= ens_set["tis_set"]["maxlength"]:
         full_staple.status = "FTX"

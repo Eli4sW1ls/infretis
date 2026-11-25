@@ -47,6 +47,12 @@ class StaplePath(Path):
         self._cached_turn_info = None  # Cache for turn detection results
         self.sh_region: Optional[dict[int, Tuple[int, int]]] = sh_region if sh_region is not None else {}  # Indices where turns occur
         self.pptype: Optional[Tuple[int, str]] = pptype  # Type of each phase point
+        # Which end of the path is the turn when both ends lie in the same
+        # state (A/A or B/B): "start" or "end", None while undecided. Such a
+        # path can cross a window twice (e.g. 0LMR2 and 2RML0 in [1*] share
+        # the same frames); the orientation fixes the pass that is its
+        # shooting region in every ensemble. See `get_oriented_sh_region`.
+        self.orientation: Optional[str] = None
 
     def _invalidate_cache(self):
         """Invalidate cached data when path changes."""
@@ -389,6 +395,77 @@ class StaplePath(Path):
 
         return new_path
     
+    def get_sh_passes(self, pp_intfs: List[float]) -> List[Tuple[int, int, str]]:
+        """Return every pass of the path through the window `pp_intfs`.
+
+        A pass is a run of frames inside (pp_intfs[0], pp_intfs[2]) that
+        crosses the middle interface, the steps into and out of the run
+        included (as in `_find_borders`). Runs touching the first or the
+        last frame are skipped (they are part of a turn at the path end).
+
+        Returns:
+            A list of (left, right, pptype) in time order; pptype from the
+            sides on which the pass enters and leaves the window.
+        """
+        orders = self.get_orders_array()
+        n = len(orders)
+        inside = (orders > pp_intfs[0]) & (orders < pp_intfs[2])
+        passes = []
+        i = 1
+        while i < n - 1:
+            if not inside[i]:
+                i += 1
+                continue
+            j = i
+            while j + 1 < n - 1 and inside[j + 1]:
+                j += 1
+            if j + 1 < n and inside[j + 1]:
+                break  # the run reaches the last frame
+            if i == 1 and inside[0]:
+                i = j + 1
+                continue  # the run starts at the first frame
+            lo = min(orders[i - 1:j + 2])
+            hi = max(orders[i - 1:j + 2])
+            if lo <= pp_intfs[1] <= hi:
+                start = "L" if orders[i - 1] <= pp_intfs[0] else "R"
+                end = "L" if orders[j + 1] <= pp_intfs[0] else "R"
+                passes.append((i, j, start + "M" + end))
+            i = j + 1
+        return passes
+
+    def get_oriented_sh_region(
+        self, intfs: List[float], pp_intfs: List[float], rgen=None
+    ) -> Optional[Tuple[Tuple[int, int], str]]:
+        """Return the shooting region and pptype fixed by the orientation.
+
+        Only for a path with both ends in A (or both in B) that crosses the
+        window `pp_intfs` more than once, e.g. A -> above the window -> A in
+        [1*]: that is two staples, 0LMR2 (turn at the end, first pass) and
+        2RML0 (turn at the start, last pass). The orientation picks one:
+        "end" -> the first pass, "start" -> the last pass. An undecided
+        orientation is drawn with `rgen` (1/2 each) and stored on the path.
+
+        Returns:
+            ((left, right), pptype), or None when the path is not ambiguous
+            in this window (use `get_sh_region` / `get_pptype` then).
+        """
+        if len(pp_intfs) < 3 or pp_intfs[0] == pp_intfs[1] or self.length < 3:
+            return None
+        orders = self.get_orders_array()
+        both_a = orders[0] <= intfs[0] and orders[-1] <= intfs[0]
+        both_b = orders[0] >= intfs[-1] and orders[-1] >= intfs[-1]
+        if not (both_a or both_b):
+            return None
+        passes = self.get_sh_passes(pp_intfs)
+        if len(passes) < 2:
+            return None
+        if self.orientation is None:
+            if rgen is None:
+                return None
+            self.orientation = "start" if rgen.random() < 0.5 else "end"
+        left, right, pptype = passes[-1] if self.orientation == "start" else passes[0]
+        return (left, right), pptype
+
     def _determine_simple_pptype(self, pp_intfs: List[float]) -> str:
         """Determine path type for simple three-interface case."""
         start_order = self.phasepoints[0].order[0]
@@ -639,6 +716,7 @@ class StaplePath(Path):
         # Deep-copy the mutable sh_region dict so the copy is independent.
         new_path.sh_region = dict(self.sh_region)
         new_path.pptype = self.pptype
+        new_path.orientation = self.orientation
         new_path._invalidate_cache()
         return new_path
     
