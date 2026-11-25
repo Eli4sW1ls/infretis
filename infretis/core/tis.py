@@ -1851,9 +1851,10 @@ def staple_sh(
             logger.warning(f"Stored shooting region does not match calculated one! {sh_region} != {check_region}, {check_region[0]}, {check_region[1]}\
                 intfs: {intfs_pp}, path sh_region: {path.sh_region}, \norders of sh_region: { [p.order[0] for p in path.phasepoints[sh_region[0]:sh_region[1]+1]] } \
                     \norders of check_region: { [p.order[0] for p in path.phasepoints[check_region[0]:check_region[1]+1]] }")
-            if int(ens_set["ens_name"]) != 1:
-                logger.error("This should not happen for TIS ensembles other than [1+]. Exiting.")
-                raise ValueError("Stored shooting region does not match calculated one!")
+            # A path whose turn ends exactly at the A or B boundary can cross
+            # the window twice; check_turns then picks the other pass. The
+            # stored region is the one the path was generated with: keep it.
+            logger.warning(f"Using the stored shooting region {sh_region} for path {path.path_number}.")
     # the trial path we will generate
     trial_path = path.empty_path(maxlen=ens_set["tis_set"]["maxlength"])
     if shooting_point is None:
@@ -2593,6 +2594,20 @@ def staple_swap(
     ):
         # The phase points are untouched, so the shooting regions that
         # were already determined for the other ensembles stay valid.
+        old_region = path.sh_region.get(ens_num)
+        if old_region is not None and region is not None and tuple(old_region) != tuple(region):
+            orders = [p.order[0] for p in path.phasepoints]
+            logger.warning(
+                "Staple swap: stored shooting region %s of path %s in ensemble %s"
+                " is replaced by the computed one %s.\norders of stored region: %s"
+                "\norders of computed region: %s",
+                old_region,
+                path.path_number,
+                ens_num,
+                region,
+                orders[old_region[0]:old_region[1] + 1],
+                orders[region[0]:region[1] + 1],
+            )
         if region is not None:
             path.sh_region[ens_num] = region
         else:

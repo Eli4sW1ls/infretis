@@ -1364,11 +1364,16 @@ class REPEX_state_staple(REPEX_state):
                                     # at the first interface below the path's maximum: 1 for an LML path (it
                                     # stays below R), one more (2) for a path that went above R. Both turns at
                                     # an interior interface: no offsets, as in the middle ensembles.
-                                    # Start->end is forced to 0 -> fwd (no randomness).
+                                    # Start->end is forced to 0 -> fwd (no randomness), except for an
+                                    # "RML" shot: the extension was prepended, so the turn above is at the
+                                    # start and the path ends in A (fwd -> 0).
                                     if st[1] == 0:
                                         high = int(np.searchsorted(self.interfaces, out_traj.ordermax[0]))
-                                        s_offset = 0
-                                        e_offset = max(high - 1, 1)
+                                        fwd = max(high - 1, 1)
+                                        if pptype == "RML":
+                                            s_offset, e_offset = fwd, 0
+                                        else:
+                                            s_offset, e_offset = 0, fwd
                             elif ens_num == len(self.ensembles) - 2:
                                 # Every path type is accepted in the last ensemble. The stored pptype is the
                                 # label of the shot segment before the extension (staple_sh), so a path whose
