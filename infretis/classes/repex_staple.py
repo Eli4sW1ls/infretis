@@ -1357,15 +1357,18 @@ class REPEX_state_staple(REPEX_state):
                                     elif pptype == "RML":
                                         s_offset = 1 
                                 elif ens_num == 1:
-                                    if pptype != "LML":
-                                        raise ValueError(
-                                            f"Ensemble {ens_num} has invalid pptype {pptype}."
-                                        )
-                                    # Force start->end to be 0 -> 1 for ensemble 2 (no randomness)
-                                    # e_offset = np.random.choice([0, 1])
-                                    # s_offset = 1 - e_offset
-                                    s_offset = 0
-                                    e_offset = 1
+                                    # Mirror of the last ensemble: every path type is accepted. The stored
+                                    # pptype is the label of the shot segment before the extension, so a path
+                                    # whose backward part stopped at R and was then extended into A carries
+                                    # "RML" although both of its turns are at A. Both turns at A: the end turns
+                                    # at the first interface below the path's maximum: 1 for an LML path (it
+                                    # stays below R), one more (2) for a path that went above R. Both turns at
+                                    # an interior interface: no offsets, as in the middle ensembles.
+                                    # Start->end is forced to 0 -> fwd (no randomness).
+                                    if st[1] == 0:
+                                        high = int(np.searchsorted(self.interfaces, out_traj.ordermax[0]))
+                                        s_offset = 0
+                                        e_offset = max(high - 1, 1)
                             elif ens_num == len(self.ensembles) - 2:
                                 # Every path type is accepted in the last ensemble. The stored pptype is the
                                 # label of the shot segment before the extension (staple_sh), so a path whose
